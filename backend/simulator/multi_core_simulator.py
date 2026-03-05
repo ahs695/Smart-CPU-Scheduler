@@ -1,6 +1,5 @@
-# backend/simulator/multi_core_simulator.py
-
 from typing import List, Dict, Optional
+
 from .process import Process
 from .core import Core
 from .scheduler_base import SchedulerBase
@@ -8,18 +7,16 @@ from .scheduler_base import SchedulerBase
 
 class MultiCoreSimulator:
     """
-    Pure discrete-time multi-core CPU simulator.
+    Discrete-time multi-core CPU simulator.
 
-    Responsibilities:
-    - Handle arrivals
-    - Maintain ready queue
-    - Ask scheduler for decisions
-    - Execute cores
-    - Track completion
-    - Record Gantt chart
+    Supports two execution modes:
 
-    Does NOT compute performance metrics.
-    Does NOT contain ML or RL logic.
+    1) Full simulation
+       simulator.run()
+
+    2) Step-based simulation (for RL)
+       simulator.reset()
+       simulator.step()
     """
 
     def __init__(
@@ -28,23 +25,46 @@ class MultiCoreSimulator:
         scheduler: SchedulerBase,
         num_cores: int
     ):
-        self.processes = processes
+
+        self.original_processes = processes
         self.scheduler = scheduler
         self.num_cores = num_cores
 
-        self.cores: List[Core] = [
-            Core(core_id=i) for i in range(num_cores)
-        ]
+        self.cores: List[Core] = [Core(i) for i in range(num_cores)]
 
+        self.processes: List[Process] = []
         self.ready_queue: List[Process] = []
         self.completed_processes: List[Process] = []
 
         self.time: int = 0
 
-        # Gantt chart: {core_id: [pid or None per timestep]}
+        # For visualization
         self.gantt_chart: Dict[int, List[Optional[int]]] = {
             i: [] for i in range(num_cores)
         }
+
+    # ------------------------------------------------------------
+
+    def reset(self):
+        """
+        Reset simulator state.
+        Used for RL episodes or repeated experiments.
+        """
+
+        self.time = 0
+
+        self.processes = [p for p in self.original_processes]
+
+        self.ready_queue = []
+        self.completed_processes = []
+
+        for core in self.cores:
+            core.reset()
+
+        for process in self.processes:
+            process.reset()
+
+        self.gantt_chart = {i: [] for i in range(self.num_cores)}
 
     # ------------------------------------------------------------
 
@@ -52,87 +72,106 @@ class MultiCoreSimulator:
         """
         Move processes arriving at current time to ready queue.
         """
+
         for process in self.processes:
+
             if process.arrival_time == self.time:
                 self.ready_queue.append(process)
 
     # ------------------------------------------------------------
 
-    def _remove_completed_from_ready(self, process: Process):
-        """
-        Remove completed process from ready queue if present.
-        """
-        if process in self.ready_queue:
-            self.ready_queue.remove(process)
+    def _all_completed(self):
 
-    # ------------------------------------------------------------
-
-    def _all_completed(self) -> bool:
         return len(self.completed_processes) == len(self.processes)
 
     # ------------------------------------------------------------
 
-    def run(self) -> Dict:
+    def step(self):
         """
-        Run simulation until all processes complete.
-
-        Returns:
-            dict containing raw simulation data.
+        Advance simulation by one timestep.
+        Useful for RL environments.
         """
 
-        # Sort processes by arrival time (deterministic behavior)
-        self.processes.sort(key=lambda p: p.arrival_time)
+        # 1️⃣ Check arrivals
+        self._add_new_arrivals()
+
+        # 2️⃣ Update waiting times
+        for process in self.ready_queue:
+            process.update_waiting_time(self.time)
+
+        # 3️⃣ Scheduler decision
+        decisions = self.scheduler.select_process(
+            ready_queue=self.ready_queue,
+            cores=self.cores,
+            time=self.time
+        )
+
+        # 4️⃣ Assign processes to cores
+        for core_id, process in decisions.items():
+            self.cores[core_id].assign_process(process)
+
+        # Remove assigned processes from ready queue
+        for core in self.cores:
+            if core.current_process in self.ready_queue:
+                self.ready_queue.remove(core.current_process)
+
+        # 5️⃣ Execute 1 time unit
+        completed = []
+
+        for core in self.cores:
+
+            finished = core.execute(self.time, time_slice=1)
+
+            # Gantt logging
+            if core.current_process:
+                self.gantt_chart[core.core_id].append(
+                    core.current_process.pid
+                )
+            else:
+                self.gantt_chart[core.core_id].append(None)
+
+            if finished:
+                completed.append(finished)
+                self.completed_processes.append(finished)
+
+        # 6️⃣ Advance time
+        self.time += 1
+
+        done = self._all_completed()
+
+        return completed, done
+
+    # ------------------------------------------------------------
+
+    def get_state(self):
+        """
+        Return simulator state (used for RL observation).
+        """
+
+        return {
+            "time": self.time,
+            "ready_queue_length": len(self.ready_queue),
+            "running_processes": [
+                core.current_process.pid if core.current_process else None
+                for core in self.cores
+            ],
+            "core_utilization": [
+                core.busy_time for core in self.cores
+            ]
+        }
+
+    # ------------------------------------------------------------
+
+    def run(self):
+        """
+        Run simulation until completion.
+        Used for classical schedulers.
+        """
+
+        self.reset()
 
         while not self._all_completed():
-
-            # 1️⃣ Handle arrivals
-            self._add_new_arrivals()
-
-            # 2️⃣ Update waiting time for ready processes
-            for process in self.ready_queue:
-                process.update_waiting_time(self.time)
-
-            # 3️⃣ Ask scheduler for decisions
-            # Expected return:
-            # { core_id: Process or None }
-            scheduling_decisions = self.scheduler.select_process(
-                ready_queue=self.ready_queue,
-                cores=self.cores,
-                time=self.time
-            )
-
-            # 4️⃣ Assign processes to cores
-            for core_id, process in scheduling_decisions.items():
-                self.cores[core_id].assign_process(process)
-
-            # Remove assigned processes from ready queue
-            for core in self.cores:
-                if core.current_process in self.ready_queue:
-                    self.ready_queue.remove(core.current_process)
-
-            # 5️⃣ Execute one time unit per core
-            for core in self.cores:
-
-                completed_process = core.execute(
-                    current_time=self.time,
-                    time_slice=1
-                )
-
-                # Log Gantt chart
-                if core.current_process:
-                    self.gantt_chart[core.core_id].append(
-                        core.current_process.pid
-                    )
-                else:
-                    self.gantt_chart[core.core_id].append(None)
-
-                # Handle completion
-                if completed_process:
-                    self.completed_processes.append(completed_process)
-                    self._remove_completed_from_ready(completed_process)
-
-            # 6️⃣ Advance time
-            self.time += 1
+            self.step()
 
         return {
             "processes": self.processes,
