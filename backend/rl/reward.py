@@ -1,33 +1,29 @@
 # backend/rl/reward.py
 
+import numpy as np
 from typing import List
 from backend.simulator.process import Process
 from backend.simulator.core import Core
-from backend.simulator.fairness import FairnessEngine
 
 
 class RewardEngine:
     """
-    PPO-stable reward function for CPU scheduling.
-
-    Key improvements:
-    - Strong completion incentive
-    - Queue reduction pressure
-    - Balanced fairness signal
-    - Proper scaling (critical for PPO)
+    Fixed PPO Dense Reward Engine.
+    
+    Provides highly granular, normalized steps to guide the agent
+    swiftly towards maximizing throughput and minimizing wait times.
     """
 
     def __init__(self):
 
-        # Tuned weights (IMPORTANT)
-        self.w_completion = 10.0
-        self.w_waiting = 0.05
-        self.w_context = 0.2
-        self.w_fairness = 1.0
-        self.w_starvation = 2.0
-        self.w_queue = 0.1
+        # Finely tuned weights to keep total sum within [-1, 1] usually
+        self.w_completion = 1.0       # throughput gain
+        self.w_wait_penalty = 0.001   # per process per step
+        self.w_idle_penalty = 0.05    # per idle core when queue is not empty
+        self.w_context = 0.01         # per context switch
+        self.w_starvation = 0.02      # per starved process per step
 
-        self.starvation_threshold = 50
+        self.starvation_threshold = 100
         self.prev_context_switches = 0
 
     # ------------------------------------------------------------
@@ -41,58 +37,35 @@ class RewardEngine:
 
         reward = 0.0
 
-        # --------------------------------------------------------
-        # 1️⃣ Strong Completion Reward (CRITICAL)
-        # --------------------------------------------------------
+        # 1️⃣ Throughput Gain (Process Completion)
         reward += self.w_completion * len(completed)
 
-        # Encourage progress every step
-        if len(completed) == 0:
-            reward -= 0.5
+        # 2️⃣ Waiting Time Penalty (Dense penalty per step)
+        # Every step a process sits in the queue, we bleed a tiny bit of reward
+        reward -= self.w_wait_penalty * len(ready_queue)
 
-        # --------------------------------------------------------
-        # 2️⃣ Waiting Penalty (scaled)
-        # --------------------------------------------------------
-        total_waiting = sum(p.waiting_time for p in ready_queue)
-        reward -= self.w_waiting * total_waiting
+        # 3️⃣ Idle Core Penalty
+        # CRITICAL: If there is work to do, but cores are idle, huge penalty.
+        idle_cores = sum(1 for core in cores if core.current_process is None)
+        if len(ready_queue) > 0:
+            reward -= self.w_idle_penalty * idle_cores
 
-        # --------------------------------------------------------
-        # 3️⃣ Queue Pressure (VERY IMPORTANT)
-        # --------------------------------------------------------
-        reward -= self.w_queue * len(ready_queue)
-
-        # --------------------------------------------------------
-        # 4️⃣ Context Switch Penalty (delta-based)
-        # --------------------------------------------------------
+        # 4️⃣ Context Switch Penalty (Delta)
         current_context = sum(core.context_switches for core in cores)
         delta_context = current_context - self.prev_context_switches
-
+        
         reward -= self.w_context * delta_context
         self.prev_context_switches = current_context
 
-        # --------------------------------------------------------
-        # 5️⃣ Fairness (scaled down for stability)
-        # --------------------------------------------------------
-        all_processes = ready_queue + [
-            core.current_process
-            for core in cores if core.current_process
-        ]
+        # 5️⃣ Starvation Penalty
+        starved_count = sum(1 for p in ready_queue if p.waiting_time >= self.starvation_threshold)
+        reward -= self.w_starvation * starved_count
 
-        if all_processes:
-            fairness = FairnessEngine.jains_cpu_fairness(all_processes)
-            reward += self.w_fairness * fairness
+        # Bound the reward to prevent exploding gradients (~[-1.0, 1.0])
+        # Tanh is a popular normalization trick for dense PPO rewards
+        normalized_reward = np.tanh(reward)
 
-        # --------------------------------------------------------
-        # 6️⃣ Starvation Penalty
-        # --------------------------------------------------------
-        starved = [
-            p for p in ready_queue
-            if p.waiting_time >= self.starvation_threshold
-        ]
-
-        reward -= self.w_starvation * len(starved)
-
-        return reward
+        return float(normalized_reward)
 
     # ------------------------------------------------------------
 

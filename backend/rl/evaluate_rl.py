@@ -1,5 +1,6 @@
 # backend/rl/evaluate_rl.py
 
+import os
 from stable_baselines3 import PPO
 
 from backend.rl.env import SchedulingEnv
@@ -22,6 +23,9 @@ class RLEvaluator:
         num_processes=30,
         num_cores=2
     ):
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Model {model_path} not found. Train first.")
+            
         self.model = PPO.load(model_path)
         self.num_processes = num_processes
         self.num_cores = num_cores
@@ -30,38 +34,48 @@ class RLEvaluator:
 
     def evaluate_rl(self, processes):
 
+        # Crucial to set max_steps extremely high so simulation never truncates early
         env = SchedulingEnv(
             processes=processes,
-            num_cores=self.num_cores
+            num_cores=self.num_cores,
+            max_queue_size=50,
+            max_steps=100000 
         )
 
         state, _ = env.reset()
 
         steps = 0
-        max_steps = 2000   # safety cap
+        safety_max = 100000
 
         while True:
-
             action, _ = self.model.predict(state, deterministic=True)
 
             state, _, terminated, truncated, _ = env.step(action)
-
             steps += 1
 
-            # ✅ Proper stopping condition
             if terminated:
                 break
-
-            # ⚠️ If truncated, KEEP GOING (important fix)
+                
             if truncated:
-                continue
-
-            # safety break
-            if steps >= max_steps:
-                print("⚠ Safety break triggered")
+                print("⚠ Episode unexpectedly truncated (hit 100k limit).")
                 break
 
+            if steps >= safety_max:
+                raise RuntimeError("Evaluation stuck in infinite loop.")
+
         sim = env.simulator
+        
+        # Explicit Error checking & Analytics logic
+        completed_count = len(sim.completed_processes)
+        total_processes = len(sim.processes)
+        
+        print("\n--- PPO Completion Stats ---")
+        percent_completed = (completed_count / total_processes) * 100
+        print(f"Processes Completed: {completed_count}/{total_processes} ({percent_completed:.2f}%)")
+        print(f"Total Simulation Time: {sim.time}")
+        
+        if completed_count < total_processes:
+            raise RuntimeError(f"🚨 FAILED! Only {completed_count}/{total_processes} processes completed!")
 
         metrics = MetricsEngine.summarize(
             processes=sim.processes,
@@ -95,7 +109,7 @@ class RLEvaluator:
 
     def run(self):
 
-        print("\nGenerating workload...\n")
+        print("\nGenerating evaluation workload...\n")
 
         processes = WorkloadGenerator.mixed(self.num_processes)
 
@@ -104,7 +118,7 @@ class RLEvaluator:
         print("Evaluating PPO...")
         results["PPO"] = self.evaluate_rl(processes)
 
-        print("Evaluating FCFS...")
+        print("\nEvaluating FCFS...")
         results["FCFS"] = self.evaluate_classical(
             FCFSScheduler(), processes
         )
@@ -144,8 +158,11 @@ class RLEvaluator:
 
 
 def main():
-    evaluator = RLEvaluator()
-    evaluator.run()
+    try:
+        evaluator = RLEvaluator()
+        evaluator.run()
+    except Exception as e:
+        print(f"\n❌ Evaluation Failed: {str(e)}")
 
 
 if __name__ == "__main__":

@@ -11,6 +11,15 @@ from backend.rl.reward import RewardEngine
 
 
 class SchedulingEnv(gym.Env):
+    """
+    Gymnasium Environment for CPU Scheduling.
+    
+    Fixed Logic:
+    - Non-preemptive action mapping to prevent thrashing.
+    - Explicit state normalization.
+    - Proper termination and truncation.
+    - Safe fallback for invalid actions.
+    """
 
     metadata = {"render_modes": []}
 
@@ -18,8 +27,8 @@ class SchedulingEnv(gym.Env):
         self,
         processes: List[Process],
         num_cores: int = 2,
-        max_queue_size: int = 10,
-        max_steps: int = 500,   # IMPORTANT
+        max_queue_size: int = 50,  # Increased fixed size to handle up to 50 processes
+        max_steps: int = 5000,     # Safely high max steps
         use_lstm: bool = False,
         lstm_model: Optional[object] = None
     ):
@@ -38,12 +47,15 @@ class SchedulingEnv(gym.Env):
 
         self.current_action = 0
         self.steps = 0
+        self.invalid_action_penalty = 0.0
 
+        # State vector: [queue_len] + [wait_times] + [rem_times] + [core_util] + [time_progress]
         obs_size = (
             1
             + max_queue_size
             + max_queue_size
             + num_cores
+            + 1
         )
 
         self.observation_space = spaces.Box(
@@ -53,6 +65,7 @@ class SchedulingEnv(gym.Env):
             dtype=np.float32
         )
 
+        # Action = index of process in ready queue to schedule
         self.action_space = spaces.Discrete(max_queue_size)
 
     # ------------------------------------------------------------
@@ -60,6 +73,7 @@ class SchedulingEnv(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
 
+        # Simulator persists across steps for the entire episode
         self.simulator = MultiCoreSimulator(
             processes=self.original_processes,
             scheduler=self,
@@ -70,83 +84,139 @@ class SchedulingEnv(gym.Env):
         self.reward_engine.reset()
 
         self.steps = 0
+        self.invalid_action_penalty = 0.0
 
         return self._get_state(), {}
 
     # ------------------------------------------------------------
 
     def step(self, action):
-
         self.current_action = int(action)
+        self.invalid_action_penalty = 0.0
+        
+        # Check if the chosen action is valid (out of bounds)
+        if len(self.simulator.ready_queue) > 0:
+            if self.current_action >= len(self.simulator.ready_queue):
+                # Fallback to safe policy (FCFS, i.e., index 0)
+                self.current_action = 0
+                self.invalid_action_penalty = -0.1  # small penalty for invalid choice
+
         self.steps += 1
 
-        completed, done = self.simulator.step()
+        # Advance simulator by ONE timestep
+        completed, sim_all_done = self.simulator.step()
 
-        reward = self.reward_engine.compute(
+        # State and Reward
+        state = self._get_state()
+        
+        step_reward = self.reward_engine.compute(
             completed=completed,
             ready_queue=self.simulator.ready_queue,
             cores=self.simulator.cores
         )
 
-        state = self._get_state()
+        reward = step_reward + self.invalid_action_penalty
 
-        terminated = done
+        # Termination rules
+        terminated = sim_all_done
         truncated = self.steps >= self.max_steps
         
-        if terminated or truncated:
+        # Severe penalty if we run out of time (didn't make progress)
+        if truncated and not terminated:
             incomplete = [
                 p for p in self.simulator.processes
                 if p.turnaround_time is None
             ]
-            reward -= 20 * len(incomplete)
+            reward -= 1.0 * len(incomplete)  # Heavy punishment for hanging
 
         return state, reward, terminated, truncated, {}
 
     # ------------------------------------------------------------
 
     def select_process(self, ready_queue, cores, time):
-
+        """
+        Called BY the simulator during step() to get core assignments.
+        This handles mapping the action to an available core.
+        """
         decisions = {}
+        
+        if not ready_queue:
+            return decisions
 
-        for core in cores:
+        rq = list(ready_queue)
+        
+        # Find which cores are actually available (prevent thrashing by skipping busy cores)
+        idle_cores = [c for c in cores if c.current_process is None]
+        
+        if not idle_cores:
+            # CPU is fully utilized. Do nothing (no preemption).
+            return decisions
 
-            if not ready_queue:
-                decisions[core.core_id] = None
-                continue
-
-            idx = min(self.current_action, len(ready_queue) - 1)
-            selected = ready_queue[idx]
-
-            # ✅ PREEMPTION (CRITICAL FIX)
-            if core.current_process != selected:
-                core.context_switches += 1
-
-            decisions[core.core_id] = selected
-
+        # 1️⃣ Primary assignment from agent's action
+        # We already ensured current_action is valid in step()
+        selected_idx = self.current_action
+        
+        # Safety bound (just in case)
+        if selected_idx >= len(rq):
+            selected_idx = 0
+            
+        selected_proc = rq.pop(selected_idx)
+        
+        # Assign to the first available core
+        target_core = idle_cores.pop(0)
+        decisions[target_core.core_id] = selected_proc
+        
+        # 2️⃣ Auto-fill remaining idle cores with FCFS
+        # The prompt requires: "IF ready_queue is NOT empty: CPU must NEVER be idle"
+        for core in idle_cores:
+            if rq:
+                proc = rq.pop(0)  # FCFS
+                decisions[core.core_id] = proc
+                
         return decisions
 
     # ------------------------------------------------------------
 
     def _get_state(self):
-
+        """
+        Constructs a normalized, fixed-size state vector.
+        """
         rq = self.simulator.ready_queue
 
-        # Normalize EVERYTHING (CRITICAL)
-        queue_len = len(rq) / self.max_queue_size
+        # 1. Queue length (normalized)
+        q_len = min(len(rq), self.max_queue_size)
+        norm_q_len = q_len / self.max_queue_size
 
-        waiting = [p.waiting_time / 100 for p in rq[:self.max_queue_size]]
-        waiting += [0] * (self.max_queue_size - len(waiting))
+        # 2. Waiting times & Remaining times (padded & normalized)
+        waiting = []
+        remaining = []
+        
+        # Assuming maximum expected metrics for normalization:
+        # e.g., max wait time 1000, max burst 500
+        MAX_WAIT = 1000.0
+        MAX_BURST = 500.0
 
-        remaining = [p.remaining_time / 100 for p in rq[:self.max_queue_size]]
-        remaining += [0] * (self.max_queue_size - len(remaining))
+        for i in range(self.max_queue_size):
+            if i < len(rq):
+                w = min(rq[i].waiting_time / MAX_WAIT, 1.0)
+                r = min(rq[i].remaining_time / MAX_BURST, 1.0)
+                waiting.append(w)
+                remaining.append(r)
+            else:
+                waiting.append(0.0)
+                remaining.append(0.0)
 
+        # 3. Core Utilization (1 if busy, 0 if idle)
         core_busy = [
             1.0 if core.current_process else 0.0
             for core in self.simulator.cores
         ]
 
+        # 4. Time progress
+        time_norm = min(self.simulator.time / self.max_steps, 1.0)
+
         state = np.array(
-            [queue_len] + waiting + remaining + core_busy,
+            [norm_q_len] + waiting + remaining + core_busy + [time_norm],
             dtype=np.float32
         )
 
