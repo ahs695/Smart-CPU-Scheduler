@@ -1,30 +1,35 @@
 # backend/rl/reward.py
 
 import numpy as np
-from typing import List
+from typing import List, Tuple
 from backend.simulator.process import Process
 from backend.simulator.core import Core
 
 
 class RewardEngine:
     """
-    Fixed PPO Dense Reward Engine.
+    Hybrid AI Delta-Based Reward Engine.
     
-    Provides highly granular, normalized steps to guide the agent
-    swiftly towards maximizing throughput and minimizing wait times.
+    Teaches dynamic preemptive scheduling by measuring delta waiting time
+    and explicitly pushing the agent to favor shorter LSTM-predicted bursts.
     """
 
     def __init__(self):
-
-        # Finely tuned weights to keep total sum within [-1, 1] usually
-        self.w_completion = 1.0       # throughput gain
-        self.w_wait_penalty = 0.001   # per process per step
-        self.w_idle_penalty = 0.05    # per idle core when queue is not empty
-        self.w_context = 0.01         # per context switch
-        self.w_starvation = 0.02      # per starved process per step
+        # Weights
+        self.w_completion = 5.0       
+        self.w_delta_wait = 0.05      
+        self.w_idle_penalty = 0.05    
+        
+        # Context switch dynamic weights
+        self.w_context_good = 0.005    # Switched to lower-predicted job
+        self.w_context_bad = 0.05      # Unnecessary/worse switch
+        
+        self.w_starvation = 0.02      
+        self.w_pred_burst = 0.05       # Penalty constant for running long jobs
 
         self.starvation_threshold = 100
         self.prev_context_switches = 0
+        self.prev_running_burst = 0.0
 
     # ------------------------------------------------------------
 
@@ -32,37 +37,53 @@ class RewardEngine:
         self,
         completed: List[Process],
         ready_queue: List[Process],
-        cores: List[Core]
+        cores: List[Core],
+        prev_wait: float,
+        curr_wait: float,
+        selected_preds: List[Tuple[int, float]]
     ) -> float:
 
         reward = 0.0
 
-        # 1️⃣ Throughput Gain (Process Completion)
+        # 1️⃣ Throughput Gain
         reward += self.w_completion * len(completed)
 
-        # 2️⃣ Waiting Time Penalty (Dense penalty per step)
-        # Every step a process sits in the queue, we bleed a tiny bit of reward
-        reward -= self.w_wait_penalty * len(ready_queue)
+        # 2️⃣ Delta Waiting Time
+        delta_wait = curr_wait - prev_wait
+        reward -= self.w_delta_wait * delta_wait
 
         # 3️⃣ Idle Core Penalty
-        # CRITICAL: If there is work to do, but cores are idle, huge penalty.
         idle_cores = sum(1 for core in cores if core.current_process is None)
-        if len(ready_queue) > 0:
+        if ready_queue:
             reward -= self.w_idle_penalty * idle_cores
 
-        # 4️⃣ Context Switch Penalty (Delta)
+        # 4️⃣ Burst Prediction Penalty (Drive SJF Behavior)
+        # Directly penalize the agent for holding long jobs on the cores
+        curr_running_burst = 0.0
+        if selected_preds:
+            for pid, pred_burst in selected_preds:
+                reward -= self.w_pred_burst * pred_burst
+            curr_running_burst = sum(pred for _, pred in selected_preds) / len(selected_preds)
+
+        # 5️⃣ Intelligent Context Switch Penalty
         current_context = sum(core.context_switches for core in cores)
         delta_context = current_context - self.prev_context_switches
         
-        reward -= self.w_context * delta_context
+        if delta_context > 0:
+            if curr_running_burst < self.prev_running_burst:
+                # Preempted for a statistically SHORTER job! Good dynamic behavior.
+                reward -= self.w_context_good * delta_context
+            else:
+                # Preempted for a WORSE or identical job. High penalty to prevent thrashing.
+                reward -= self.w_context_bad * delta_context
+                
         self.prev_context_switches = current_context
+        self.prev_running_burst = curr_running_burst
 
-        # 5️⃣ Starvation Penalty
+        # 6️⃣ Starvation Penalty
         starved_count = sum(1 for p in ready_queue if p.waiting_time >= self.starvation_threshold)
         reward -= self.w_starvation * starved_count
 
-        # Bound the reward to prevent exploding gradients (~[-1.0, 1.0])
-        # Tanh is a popular normalization trick for dense PPO rewards
         normalized_reward = np.tanh(reward)
 
         return float(normalized_reward)
@@ -71,3 +92,4 @@ class RewardEngine:
 
     def reset(self):
         self.prev_context_switches = 0
+        self.prev_running_burst = 0.0

@@ -82,7 +82,7 @@ class MultiCoreSimulator:
 
     def _all_completed(self):
 
-        return len(self.completed_processes) == len(self.processes)
+        return len(self.completed_processes) >= len(self.processes)
 
     # ------------------------------------------------------------
 
@@ -108,6 +108,12 @@ class MultiCoreSimulator:
 
         # 4️⃣ Assign processes to cores
         for core_id, process in decisions.items():
+            # [CRITICAL FIX] If core is preempted, put old process back in ready_queue
+            old_process = self.cores[core_id].current_process
+            if old_process is not None and old_process != process and not old_process.is_completed():
+                if old_process not in self.ready_queue:
+                    self.ready_queue.append(old_process)
+                    
             self.cores[core_id].assign_process(process)
 
         # Remove assigned processes from ready queue
