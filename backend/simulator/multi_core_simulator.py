@@ -107,7 +107,23 @@ class MultiCoreSimulator:
         )
 
         # 4️⃣ Assign processes to cores
+        assigned_pids = set()
+        
+        # Ensure every core is explicitly accounted for
+        final_decisions = {c.core_id: None for c in self.cores}
         for core_id, process in decisions.items():
+            if process is not None:
+                # Validation: Prevent same process on multiple cores
+                if process.pid in assigned_pids:
+                    # Duplicate residency detected! Force this assignment to None
+                    final_decisions[core_id] = None
+                else:
+                    final_decisions[core_id] = process
+                    assigned_pids.add(process.pid)
+            else:
+                final_decisions[core_id] = None
+
+        for core_id, process in final_decisions.items():
             # [CRITICAL FIX] If core is preempted, put old process back in ready_queue
             old_process = self.cores[core_id].current_process
             if old_process is not None and old_process != process and not old_process.is_completed():

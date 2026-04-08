@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #0a0a0c;
+  --color-card: #141417;
+  --color-primary: #3b82f6;
+  --color-secondary: #10b981;
+  --color-accent: #8b5cf6;
+  
+  --font-sans: "Inter", "system-ui", "sans-serif";
+}
+
+@layer base {
+  body {
+    @apply bg-background text-white antialiased selection:bg-primary/30;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-card/50 border border-white/5 backdrop-blur-xl rounded-2xl shadow-2xl;
+  }
+  
+  .glass-input {
+    @apply bg-white/5 border border-white/10 rounded-lg px-4 py-2 focus:border-primary/50 focus:ring-1 focus:ring-primary/50 outline-none transition-all;
+  }
+
+  .btn-primary {
+    @apply bg-primary hover:bg-primary/80 text-white font-medium px-6 py-2 rounded-xl transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none;
+  }
+}
+
+/* Custom Gantt Styles */
+.gantt-row {
+  @apply relative h-12 border-b border-white/5 w-full;
+}
+
+.gantt-block {
+  @apply absolute h-8 top-2 rounded-md flex items-center justify-center text-[10px] font-bold text-white shadow-lg cursor-pointer transition-transform hover:scale-105;
+}

@@ -137,12 +137,13 @@ def main():
     parser.add_argument("--mode", type=str, default="hybrid", choices=["ppo", "hybrid"],
                         help="Train purely algorithmic 'ppo' or advanced predictive 'hybrid' mappings.")
     parser.add_argument("--timesteps", type=int, default=200_000, help="Total execution limits")
+    parser.add_argument("--cores", type=int, default=2, help="Number of CPU cores to simulate")
     args = parser.parse_args()
 
     trainer = PPOTrainer(
         mode=args.mode,
         num_processes=30,
-        num_cores=2,
+        num_cores=args.cores,
         total_timesteps=args.timesteps
     )
 

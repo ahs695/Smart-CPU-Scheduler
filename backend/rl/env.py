@@ -140,9 +140,10 @@ class SchedulingEnv(gym.Env):
     def select_process(self, ready_queue, cores, time):
         """
         Extracts action array and maps precisely to each core.
-        Enforces preemption correctly and handles fallback validation.
+        Enforces residency validation: One process, one core.
         """
-        decisions = {}
+        # Ensure every core has an entry (default to None/Idle)
+        decisions = {core.core_id: None for core in cores}
         
         # Available pool = queue + currently running
         pool = list(ready_queue)
@@ -153,7 +154,7 @@ class SchedulingEnv(gym.Env):
         if not pool:
             return decisions
             
-        assigned_processes = set()
+        assigned_pids = set()
 
         for i, core in enumerate(cores):
             idx = int(self.current_action[i])
@@ -162,48 +163,39 @@ class SchedulingEnv(gym.Env):
             if idx >= len(pool):
                 self.invalid_action_penalty -= 0.1
                 # Fallback: Keep current, else FCFS
-                if core.current_process and core.current_process.pid not in assigned_processes:
+                if core.current_process and core.current_process.pid not in assigned_pids:
                     decisions[core.core_id] = core.current_process
-                    assigned_processes.add(core.current_process.pid)
+                    assigned_pids.add(core.current_process.pid)
                 else:
                     # Find first FCFS that isn't assigned
                     for p in pool:
-                        if p.pid not in assigned_processes:
+                        if p.pid not in assigned_pids:
                             decisions[core.core_id] = p
-                            assigned_processes.add(p.pid)
+                            assigned_pids.add(p.pid)
                             break
                 continue
                 
             selected_process = pool[idx]
             
-            # Validation 2: Duplicate assignment
-            if selected_process.pid in assigned_processes:
-                self.invalid_action_penalty -= 0.1
-                # Fallback again
-                if core.current_process and core.current_process.pid not in assigned_processes:
+            # Validation 2: Duplicate residency attempt
+            if selected_process.pid in assigned_pids:
+                self.invalid_action_penalty -= 0.2 # Heavier penalty for duplication
+                # Fallback to keep core alive if possible with unique work
+                if core.current_process and core.current_process.pid not in assigned_pids:
                     decisions[core.core_id] = core.current_process
-                    assigned_processes.add(core.current_process.pid)
+                    assigned_pids.add(core.current_process.pid)
                 else:
                     for p in pool:
-                        if p.pid not in assigned_processes:
+                        if p.pid not in assigned_pids:
                             decisions[core.core_id] = p
-                            assigned_processes.add(p.pid)
+                            assigned_pids.add(p.pid)
                             break
                 continue
 
             # Valid assignment!
             decisions[core.core_id] = selected_process
-            assigned_processes.add(selected_process.pid)
+            assigned_pids.add(selected_process.pid)
             
-        # Guarantee no idle cores if ready_queue had remaining unassigned work
-        unassigned_pool = [p for p in pool if p.pid not in assigned_processes]
-        for core in cores:
-            if core.core_id not in decisions or decisions[core.core_id] is None:
-                if unassigned_pool:
-                    dec = unassigned_pool.pop(0)
-                    decisions[core.core_id] = dec
-                    assigned_processes.add(dec.pid)
-
         return decisions
 
     # ------------------------------------------------------------
