@@ -14,6 +14,7 @@ export default function Dashboard() {
   const [lstmSamples, setLstmSamples] = useState([]);
   const [backendStatus, setBackendStatus] = useState('loading');
   const [error, setError] = useState(null);
+  const [showMetricsTable, setShowMetricsTable] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -126,6 +127,43 @@ export default function Dashboard() {
                   numCores={simulationData.trace[0].cores.length}
                 />
                 <MetricsPanel metrics={simulationData.metrics} />
+                
+                <div className="flex flex-col gap-4 mt-2">
+                  <button 
+                    onClick={() => setShowMetricsTable(!showMetricsTable)}
+                    className="w-full sm:w-auto px-6 py-3 rounded-xl font-bold uppercase tracking-widest text-xs transition-all duration-300 border border-secondary/30 bg-secondary/10 text-secondary hover:bg-secondary/20 self-center"
+                  >
+                    {showMetricsTable ? "Hide Metrics Comparison" : "Show Overall Metrics Comparison"}
+                  </button>
+                  {showMetricsTable && (
+                    <div className="glass-card p-6 border border-white/10 rounded-xl overflow-x-auto animate-in fade-in slide-in-from-top-4">
+                      <table className="w-full text-left text-sm whitespace-nowrap">
+                        <thead>
+                          <tr className="border-b border-white/10 text-white/50">
+                            <th className="pb-3 px-4 font-medium uppercase tracking-wider text-xs">Algorithm</th>
+                            <th className="pb-3 px-4 font-medium uppercase tracking-wider text-xs text-right">Avg Waiting</th>
+                            <th className="pb-3 px-4 font-medium uppercase tracking-wider text-xs text-right">Avg Turnaround</th>
+                            <th className="pb-3 px-4 font-medium uppercase tracking-wider text-xs text-center">Fairness Index</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {comparisonData.map((data, index) => (
+                            <tr key={data.name} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                              <td className="py-4 px-4 font-bold text-primary">{data.name}</td>
+                              <td className="py-4 px-4 text-right font-mono text-white/80">{data.waiting.toFixed(1)}</td>
+                              <td className="py-4 px-4 text-right font-mono text-white/80">{data.turnaround.toFixed(1)}</td>
+                              <td className="py-4 px-4 text-center font-mono">
+                                <span className={`px-2 py-1 rounded-full text-xs font-bold ${data.fairness > 0.9 ? 'bg-emerald-500/10 text-emerald-400' : data.fairness > 0.8 ? 'bg-yellow-500/10 text-yellow-400' : 'bg-red-500/10 text-red-400'}`}>
+                                  {data.fairness.toFixed(2)}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="h-[400px] glass-card flex flex-col items-center justify-center border-dashed border-white/10 opacity-50">
