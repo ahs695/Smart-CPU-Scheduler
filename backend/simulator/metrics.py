@@ -100,20 +100,20 @@ class MetricsEngine:
     @staticmethod
     def jains_fairness_index(processes: List[Process]) -> float:
         """
-        Jain’s fairness index based on CPU time received.
+        Jain’s fairness index based on normalized turnaround time (Burst Time / Turnaround Time).
         """
 
-        cpu_shares = [
-            (p.burst_time - p.remaining_time)
-            for p in processes
-            if p.remaining_time is not None
-        ]
+        rates = []
+        for p in processes:
+            if p.turnaround_time is not None and p.turnaround_time > 0:
+                # Effective CPU rate: what fraction of the turnaround time was spent actually running
+                rates.append(p.burst_time / p.turnaround_time)
 
-        if not cpu_shares:
+        if not rates:
             return 0.0
 
-        numerator = sum(cpu_shares) ** 2
-        denominator = len(cpu_shares) * sum(x ** 2 for x in cpu_shares)
+        numerator = sum(rates) ** 2
+        denominator = len(rates) * sum(x ** 2 for x in rates)
 
         if denominator == 0:
             return 0.0

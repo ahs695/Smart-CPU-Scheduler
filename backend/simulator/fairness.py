@@ -5,11 +5,11 @@ from .process import Process
 class FairnessEngine:
 
     @staticmethod
-    def cpu_shares(processes: List[Process]):
+    def normalized_turnaround_times(processes: List[Process]):
         """
-        CPU time received by each process.
+        Effective CPU rate received by each process (Burst Time / Turnaround Time).
         """
-        return [p.burst_time - p.remaining_time for p in processes]
+        return [p.burst_time / p.turnaround_time for p in processes if p.turnaround_time is not None and p.turnaround_time > 0]
 
     @staticmethod
     def jains_index(values: List[float]) -> float:
@@ -28,7 +28,7 @@ class FairnessEngine:
     @staticmethod
     def jains_cpu_fairness(processes: List[Process]) -> float:
 
-        shares = FairnessEngine.cpu_shares(processes)
+        shares = FairnessEngine.normalized_turnaround_times(processes)
         return FairnessEngine.jains_index(shares)
 
     @staticmethod

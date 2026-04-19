@@ -167,7 +167,7 @@ def run_all_baselines(
             done += 1
             pct = (done / total_experiments) * 100
             print(
-                f"  ✓ run_id={run_id:>2}  workload={workload_type:<10}  "
+                f"  [OK] run_id={run_id:>2}  workload={workload_type:<10}  "
                 f"({pct:.0f}% complete)"
             )
 
