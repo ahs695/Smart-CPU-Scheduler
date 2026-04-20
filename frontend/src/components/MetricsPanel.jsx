@@ -31,19 +31,19 @@ export default function MetricsPanel({ metrics }) {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: idx * 0.1 }}
-            className="glass-card p-4 relative overflow-hidden group hover:border-white/10 transition-colors"
+            className="glass-card glass-card--inset-border p-4 relative overflow-hidden group hover:border-mtx2 transition-colors"
           >
-            <div className={`p-2 rounded-lg bg-white/10 w-fit mb-3 ${config.color} shadow-lg`}>
+            <div className={`p-2 rounded-lg bg-mtx2 w-fit mb-3`}>
               <config.icon size={18} />
             </div>
             
-            <div className="text-[10px] text-white/50 uppercase font-bold tracking-widest leading-none mb-1">
+            <div className="text-[10px] text-mtx3 uppercase font-bold tracking-widest leading-none mb-1">
               {config.label}
             </div>
             
             <div className="flex items-baseline gap-1">
-              <span className="text-2xl font-mono font-bold text-white/90">{displayValue}</span>
-              <span className="text-[10px] text-white/40 font-bold">{config.unit}</span>
+              <span className="text-2xl font-mono font-bold text-mtx5">{displayValue}</span>
+              <span className="text-[10px] text-mtx2 font-bold">{config.unit}</span>
             </div>
 
             {/* Subtle graph background decoration */}

@@ -18,6 +18,12 @@
   }
 }
 
+.logo-title {
+  background: linear-gradient(90deg, #14532d, #16a34a, #22c55e);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
 .hero {
   position: relative;
 
@@ -59,7 +65,7 @@
 
 #center {
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   gap: 25px;
   place-content: center;
   place-items: center;

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { schedulerService } from '../services/api';
 import InputPanel from './InputPanel';
 import GanttChart from './GanttChart';
+import '../App.css';
 import MetricsPanel from './MetricsPanel';
 import { RewardCurve, LSTMPredictionChart, ComparisonChart } from './TrainingCharts';
 import { Activity, Brain, BarChart3, Info, AlertCircle } from 'lucide-react';
@@ -70,7 +71,6 @@ export default function Dashboard() {
       const response = await schedulerService.simulate(config);
       setSimulationData(response.data);
       setLastSimConfig(config);
-      // Fetch fresh comparison for the same processes
       fetchComparison(config);
     } catch (err) {
       setError(err.response?.data?.error || "Simulation failed. Please check if the backend is running.");
@@ -85,20 +85,17 @@ export default function Dashboard() {
       {/* Header */}
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-black tracking-tighter flex items-center gap-3">
-            <div className="p-2 bg-primary rounded-xl shadow-[0_0_20px_rgba(59,130,246,0.3)]">
-              <Brain size={28} className="text-white" />
-            </div>
-            AI SMART SCHEDULER <span className="text-white/30 font-light tracking-normal">DASHBOARD</span>
+          <h1 class="logo-title" className="logo-title text-3xl font-black tracking-tighter flex items-center gap-3">
+            AIMOS <span className="text-mtx4 font-light tracking-normal"> Dashboard</span>
           </h1>
-          <p className="text-white/60 text-sm mt-1 font-medium italic">Research-grade multi-core CPU scheduling simulation with LSTM + PPO Hybrid architecture.</p>
+          <p className="text-mtx2 text-sm mt-1 font-medium italic">Research-grade AI-Driven Multi Core CPU scheduling simulation</p>
         </div>
 
         <div className="flex items-center gap-3">
           <div className={`flex items-center gap-2 px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest border ${
-            backendStatus === 'online' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'
+            backendStatus === 'online' ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-red-500 text-white border-red-500'
           }`}>
-            <div className={`w-2 h-2 rounded-full ${backendStatus === 'online' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-red-500'}`} />
+            <div className={`w-2 h-2 rounded-full ${backendStatus === 'online' ? 'bg-emerald-300 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-red-300'}`} />
             Backend {backendStatus}
           </div>
         </div>
@@ -116,7 +113,7 @@ export default function Dashboard() {
         <div className="xl:col-span-4 flex flex-col gap-8">
           <section>
             <div className="flex items-center gap-2 mb-4 text-primary/80">
-              <Activity size={16} />
+              
               <h2 className="text-xs font-bold uppercase tracking-[0.2em]">Simulation Control</h2>
             </div>
             <InputPanel 
@@ -127,7 +124,7 @@ export default function Dashboard() {
 
           <section>
             <div className="flex items-center gap-2 mb-4 text-primary/80">
-              <BarChart3 size={16} />
+              
               <h2 className="text-xs font-bold uppercase tracking-[0.2em]">Analytics & Comparison</h2>
             </div>
             <ComparisonChart data={comparisonData} />
@@ -139,7 +136,7 @@ export default function Dashboard() {
           <section>
             <div className="flex items-center justify-between mb-4 text-primary/80">
               <div className="flex items-center gap-2">
-                <Brain size={16} />
+              
                 <h2 className="text-xs font-bold uppercase tracking-[0.2em]">Live Execution Visualization</h2>
               </div>
               {simulationData && (
@@ -158,23 +155,12 @@ export default function Dashboard() {
                 <MetricsPanel metrics={simulationData.metrics} />
                 
                 <div className="flex flex-col gap-4 mt-2">
-                  <button 
-                    onClick={() => {
-                      setShowMetricsTable(!showMetricsTable);
-                      if (!showMetricsTable && comparisonData.length === 0 && lastSimConfig) {
-                        fetchComparison(lastSimConfig);
-                      }
-                    }}
-                    disabled={isComparing}
-                    className="w-full sm:w-auto px-6 py-3 rounded-xl font-bold uppercase tracking-widest text-xs transition-all duration-300 border border-secondary/30 bg-secondary/10 text-secondary hover:bg-secondary/20 self-center disabled:opacity-50"
-                  >
-                    {isComparing ? "Comparing All Algorithms..." : showMetricsTable ? "Hide Metrics Comparison" : "Compare All Algorithms"}
-                  </button>
-                  {showMetricsTable && (
-                    <div className="glass-card p-6 border border-white/10 rounded-xl overflow-x-auto animate-in fade-in slide-in-from-top-4">
+                  
+                  
+                    <div className="overflow-hidden glass-card--inset-border glass-card p-6 border border-mtx2 rounded-xl animate-in fade-in slide-in-from-top-4">
                       <table className="w-full text-left text-sm whitespace-nowrap">
                         <thead>
-                          <tr className="border-b border-white/10 text-white/50">
+                          <tr className="border-b border-mtx2 text-mtx3">
                             <th className="pb-3 px-4 font-medium uppercase tracking-wider text-xs">Algorithm</th>
                             <th className="pb-3 px-4 font-medium uppercase tracking-wider text-xs text-right">Avg Waiting</th>
                             <th className="pb-3 px-4 font-medium uppercase tracking-wider text-xs text-right">Avg Turnaround</th>
@@ -183,12 +169,12 @@ export default function Dashboard() {
                         </thead>
                         <tbody>
                           {comparisonData.map((data, index) => (
-                            <tr key={data.name} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                            <tr key={data.name} className="border-b border-mtx1 hover:bg-mtx1 transition-colors">
                               <td className="py-4 px-4 font-bold text-primary">{data.name}</td>
-                              <td className="py-4 px-4 text-right font-mono text-white/80">{data.waiting.toFixed(1)}</td>
-                              <td className="py-4 px-4 text-right font-mono text-white/80">{data.turnaround.toFixed(1)}</td>
+                              <td className="py-4 px-4 text-right font-mono text-mtx5">{data.waiting.toFixed(1)}</td>
+                              <td className="py-4 px-4 text-right font-mono text-mtx5">{data.turnaround.toFixed(1)}</td>
                               <td className="py-4 px-4 text-center font-mono">
-                                <span className={`px-2 py-1 rounded-full text-xs font-bold ${data.fairness > 0.9 ? 'bg-emerald-500/10 text-emerald-400' : data.fairness > 0.8 ? 'bg-yellow-500/10 text-yellow-400' : 'bg-red-500/10 text-red-400'}`}>
+                                <span className={`px-2 py-1 rounded-full text-xs font-bold ${data.fairness > 0.9 ? 'bg-emerald-500 text-white' : data.fairness > 0.8 ? 'bg-yellow-500 text-white' : 'bg-red-500 text-white'}`}>
                                   {data.fairness.toFixed(2)}
                                 </span>
                               </td>
@@ -197,14 +183,13 @@ export default function Dashboard() {
                         </tbody>
                       </table>
                     </div>
-                  )}
                 </div>
               </div>
             ) : (
-              <div className="h-[400px] glass-card flex flex-col items-center justify-center border-dashed border-white/10 opacity-50">
-                <Info size={48} className="text-white/10 mb-4" />
+              <div className="h-[400px] glass-card--inset-border glass-card flex flex-col items-center justify-center border-dashed border-mtx1 opacity-50">
+             
                 <p className="text-sm font-medium">Ready to Simulate</p>
-                <p className="text-xs text-white/30 italic">Define workload inputs on the left to begin.</p>
+                <p className="text-xs text-mtx2 italic">Define workload inputs on the left to begin.</p>
               </div>
             )}
           </section>
@@ -215,7 +200,7 @@ export default function Dashboard() {
           </div>
 
           {/* AI Insights Panel (Placeholder logic for demonstration) */}
-          <section className="glass-card p-6 border-l-4 border-primary bg-primary/[0.02]">
+          <section className="glass-card--inset-border glass-card p-6 border-l-4 border-primary bg-primary/[0.02]">
             <div className="flex items-center gap-3 mb-4">
               <Brain className="text-primary" />
               <h3 className="text-sm font-bold uppercase tracking-widest text-primary/80">Hybrid AI Insights</h3>
@@ -226,8 +211,8 @@ export default function Dashboard() {
                   <span className="text-xs font-bold text-primary">01</span>
                 </div>
                 <div>
-                  <h4 className="text-sm font-bold text-white/90 underline decoration-primary/30 underline-offset-4">Proactive SJF Preemption</h4>
-                  <p className="text-xs text-white/70 leading-relaxed mt-1">
+                  <h4 className="text-sm font-bold text-mtx5 underline decoration-primary/30 underline-offset-4">Proactive SJF Preemption</h4>
+                  <p className="text-xs text-mtx4 leading-relaxed mt-1">
                     The Hybrid model utilized LSTM burst predictions to preempt Core 0 when a shorter task (P3) arrived, reducing potential waiting time by 14%.
                   </p>
                 </div>
@@ -237,8 +222,8 @@ export default function Dashboard() {
                   <span className="text-xs font-bold text-secondary">02</span>
                 </div>
                 <div>
-                  <h4 className="text-sm font-bold text-white/90 underline decoration-secondary/30 underline-offset-4">Load Balancing Efficiency</h4>
-                  <p className="text-xs text-white/70 leading-relaxed mt-1">
+                  <h4 className="text-sm font-bold text-mtx5 underline decoration-secondary/30 underline-offset-4">Load Balancing Efficiency</h4>
+                  <p className="text-xs text-mtx4 leading-relaxed mt-1">
                     PPO-guided scheduling distributed compute-intensive tasks across 2 cores to maintain a fairness index above 0.92, outperforming naive Round Robin.
                   </p>
                 </div>

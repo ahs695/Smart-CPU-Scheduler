@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Play, Zap, Monitor, Layers, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, Play, Zap, Monitor, Layers, AlertCircle,Upload } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 const WORKLOAD_PRESETS = [
@@ -61,31 +61,71 @@ export default function InputPanel({ onSimulate, isSimulating }) {
     setProcesses(data);
   };
 
+  const handleFileUpload = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target.result;
+        const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+        if (lines.length < 2) return; // Need header + data
+        
+        const headers = lines[0].toLowerCase().split(',').map(h => h.trim());
+        const pidIdx = headers.findIndex(h => h.includes('pid') || h.includes('id'));
+        const arrivalIdx = headers.findIndex(h => h.includes('arrival') || h.includes('arrive'));
+        const burstIdx = headers.findIndex(h => h.includes('burst') || h.includes('time'));
+        const priorityIdx = headers.findIndex(h => h.includes('priority') || h.includes('prio'));
+
+        const newProcesses = [];
+        for (let i = 1; i < lines.length; i++) {
+          const values = lines[i].split(',').map(v => v.trim());
+          if (values.length < 2) continue; // Skip incomplete lines
+
+          newProcesses.push({
+            pid: pidIdx >= 0 ? parseInt(values[pidIdx]) : i - 1,
+            arrival: arrivalIdx >= 0 ? parseInt(values[arrivalIdx]) || 0 : 0,
+            burst: burstIdx >= 0 ? parseInt(values[burstIdx]) || 5 : 5,
+            priority: priorityIdx >= 0 ? parseInt(values[priorityIdx]) || 1 : 1,
+          });
+        }
+        
+        if (newProcesses.length > 0) {
+          setProcesses(newProcesses);
+        }
+      } catch (err) {
+        console.error("Failed to parse CSV", err);
+      } finally {
+        event.target.value = null; // reset input
+      }
+    };
+    reader.readAsText(file);
+  };
   return (
     <div className="flex flex-col gap-6">
       {/* Configuration Header */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="flex flex-col gap-2">
-          <label className="text-xs text-primary/70 uppercase font-bold tracking-widest pl-1">Scheduler Architecture</label>
+          <label className="text-xs text-white text-center bg-accent rounded-3xl uppercase font-bold tracking-widest ">Scheduler Architecture</label>
           <select 
-            value={scheduler}
-            onChange={(e) => setScheduler(e.target.value)}
-            className="glass-input w-full appearance-none bg-card text-white font-medium"
-          >
-            <option value="HYBRID">Hybrid (PPO + LSTM)</option>
-            <option value="PPO">PPO Agent</option>
-            <option value="FCFS">First-Come-First-Serve</option>
-            <option value="SJF">Shortest Job First</option>
-            <option value="RR">Round Robin</option>
-            <option value="MLFQ">Multi-Level Feedback Queue</option>
-          </select>
-        </div>
-
+  value={scheduler}
+  onChange={(e) => setScheduler(e.target.value)}
+  className="glass-input text-black"
+>
+  <option value="HYBRID">Hybrid (PPO + LSTM)</option>
+  <option value="PPO">PPO Agent</option>
+  <option value="FCFS">First-Come-First-Serve</option>
+  <option value="SJF">Shortest Job First</option>
+  <option value="RR">Round Robin</option>
+  <option value="MLFQ">Multi-Level Feedback Queue</option>
+</select>
+</div>
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between pl-1">
             <label className="text-xs text-primary/70 uppercase font-bold tracking-widest">CPU Cores</label>
             {isAIScheduler && (
-              <span className="text-[10px] text-primary font-bold flex items-center gap-1 bg-primary/10 px-2 py-0.5 rounded-full">
+              <span className="text-[10px] text-primary font-bold flex items-center gap-1 bg-primary/10 px-1 py-0.5 rounded-full">
                 <AlertCircle size={10} /> Optimized for 2
               </span>
             )}
@@ -98,7 +138,7 @@ export default function InputPanel({ onSimulate, isSimulating }) {
                 onClick={() => setCores(c)}
                 className={cn(
                   "flex-1 py-2 rounded-lg border transition-all text-sm font-bold",
-                  cores === c ? "bg-primary/20 border-primary text-primary" : "border-white/10 text-white/40 hover:border-white/20",
+                  cores === c ? "bg-primary/20 border-primary text-primary" : "border-mtx1 text-mtx3 hover:border-white",
                   isAIScheduler && c !== 2 && "opacity-20 grayscale cursor-not-allowed border-dashed"
                 )}
               >
@@ -115,29 +155,38 @@ export default function InputPanel({ onSimulate, isSimulating }) {
           <button
             key={i}
             onClick={() => applyPreset(p.data)}
-            className="flex-1 flex items-center justify-center gap-2 py-3 glass-card hover:bg-white/5 transition-all group"
+            className="flex-1 flex items-center justify-center gap-2 py-3 glass-card--inset-border glass-card hover:bg-gray-200 transition-all group"
           >
-            <p.icon size={16} className="text-white/40 group-hover:text-primary transition-colors" />
-            <span className="text-xs font-bold uppercase tracking-wider text-white/60">{p.name}</span>
+            <span className="text-xs font-bold uppercase tracking-wider text-mtx4">{p.name}</span>
           </button>
         ))}
       </div>
 
       {/* Process Table */}
-      <div className="glass-card overflow-hidden">
-        <div className="p-4 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
-          <h3 className="text-sm font-bold uppercase tracking-widest text-white/60">Workload Definition</h3>
-          <button 
-            onClick={addProcess}
-            className="p-2 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
-          >
-            <Plus size={16} />
-          </button>
+      <div className="glass-card--inset-border glass-card overflow-hidden">
+        <div className="p-4 border-b border-mtx1 flex items-center justify-between bg-block">
+          <h3 className="text-sm font-bold uppercase tracking-widest text-mtx3">Workload Definition</h3>
+          <div className="flex gap-2">
+            <label 
+              className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors cursor-pointer flex items-center gap-2"
+              title="Import from CSV"
+            >
+              <Upload size={16} />
+              <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
+            </label>
+            <button 
+              onClick={addProcess}
+              className="p-2 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+              title="Add Process"
+            >
+              <Plus size={16} />
+            </button>
+          </div>
         </div>
         
-        <div className="max-h-[300px] overflow-y-auto">
+        <div className="max-h-[300px] overflow-x-hidden overflow-y-auto">
           <table className="w-full text-left text-sm">
-            <thead className="text-[10px] text-white/20 uppercase tracking-widest border-b border-white/5">
+            <thead className="text-[10px] text-mtx2 uppercase tracking-widest border-b border-mtx1">
               <tr>
                 <th className="px-4 py-3">PID</th>
                 <th className="px-4 py-3">Arrival</th>
@@ -148,14 +197,14 @@ export default function InputPanel({ onSimulate, isSimulating }) {
             </thead>
             <tbody>
               {processes.map((p, i) => (
-                <tr key={i} className="border-b border-white/5 group hover:bg-white/[0.04] transition-colors">
+                <tr key={i} className="border-b border-mtx1 group hover:bg-gray-200 transition-colors">
                   <td className="px-4 py-3 font-mono text-primary font-bold">P{p.pid}</td>
                   <td className="px-4 py-3">
                     <input 
                       type="number" 
                       value={p.arrival}
                       onChange={(e) => updateProcess(i, 'arrival', e.target.value)}
-                      className="w-16 bg-transparent border-none focus:ring-0 font-mono text-white/90"
+                      className="w-16 bg-transparent border-none focus:ring-0 font-mono text-mtx5"
                     />
                   </td>
                   <td className="px-4 py-3">
@@ -163,7 +212,7 @@ export default function InputPanel({ onSimulate, isSimulating }) {
                       type="number" 
                       value={p.burst}
                       onChange={(e) => updateProcess(i, 'burst', e.target.value)}
-                      className="w-16 bg-transparent border-none focus:ring-0 font-mono text-white/90"
+                      className="w-16 bg-transparent border-none focus:ring-0 font-mono text-mtx5"
                     />
                   </td>
                   <td className="px-4 py-3">
@@ -171,13 +220,13 @@ export default function InputPanel({ onSimulate, isSimulating }) {
                       type="number" 
                       value={p.priority}
                       onChange={(e) => updateProcess(i, 'priority', e.target.value)}
-                      className="w-16 bg-transparent border-none focus:ring-0 font-mono text-white/90"
+                      className="w-16 bg-transparent border-none focus:ring-0 font-mono text-mtx5"
                     />
                   </td>
                   <td className="px-4 py-3 text-right">
                     <button 
                       onClick={() => removeProcess(i)}
-                      className="p-2 text-white/30 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                      className="p-2 text-mtx2 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
                     >
                       <Trash2 size={16} />
                     </button>
@@ -194,8 +243,8 @@ export default function InputPanel({ onSimulate, isSimulating }) {
         disabled={isSimulating || processes.length === 0}
         className="btn-primary w-full h-14 flex items-center justify-center gap-2 group"
       >
-        <Play size={20} className={cn("transition-transform group-hover:scale-110", isSimulating && "animate-pulse")} />
-        <span className="text-lg font-bold">RUN SIMULATION</span>
+        <Play size={20} className={cn("transition-transform text-white group-hover:scale-110", isSimulating && "animate-pulse")} />
+        <span className="text-lg text-white font-bold">RUN SIMULATION</span>
       </button>
     </div>
   );

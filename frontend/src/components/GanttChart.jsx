@@ -60,7 +60,7 @@ export default function GanttChart({ trace, numCores, totalTime }) {
   return (
     <div className="flex flex-col gap-6">
       {/* Controls */}
-      <header className="flex items-center justify-between p-4 glass-card border border-white/5 bg-card/30 backdrop-blur-md rounded-2xl shadow-xl">
+      <header className="flex items-center justify-between p-4 glass-card border border-mtx1 bg-card/30 backdrop-blur-md rounded-2xl shadow-xl">
         <div className="flex items-center gap-4">
           <button 
             onClick={() => setIsPlaying(!isPlaying)}
@@ -71,7 +71,7 @@ export default function GanttChart({ trace, numCores, totalTime }) {
           
           <button 
             onClick={() => { setCurrentTime(-1); setIsPlaying(false); }}
-            className="p-3 rounded-full hover:bg-white/5 transition-colors"
+            className="p-3 rounded-full hover:bg-mtx2 transition-colors"
           >
             <RotateCcw size={20} />
           </button>
@@ -84,7 +84,7 @@ export default function GanttChart({ trace, numCores, totalTime }) {
                 onClick={() => setSpeed(s)}
                 className={cn(
                   "px-3 py-1 rounded-md text-sm transition-all font-bold",
-                  speed === s ? "bg-primary text-white shadow-[0_0_10px_rgba(59,130,246,0.5)]" : "hover:bg-white/10 text-white/60"
+                  speed === s ? "bg-primary text-black shadow-[0_0_10px_rgba(59,130,246,0.5)]" : "hover:bg-mtx1 text-mtx3"
                 )}
               >
                 {s}x
@@ -96,10 +96,10 @@ export default function GanttChart({ trace, numCores, totalTime }) {
         <div className="flex items-center gap-6">
           <div className="text-right">
             <div className="text-[10px] text-primary/70 uppercase font-bold tracking-widest leading-none mb-1">Simulation Time</div>
-            <div className="text-2xl font-mono text-primary font-bold">{currentTime + 1} <span className="text-sm text-white/30">/ {trace.length}</span></div>
+            <div className="text-2xl font-mono text-primary font-bold">{currentTime + 1} <span className="text-sm text-mtx2">/ {trace.length}</span></div>
           </div>
           
-          <div className="h-10 w-px bg-white/10" />
+          <div className="h-10 w-px bg-mtx1" />
           
           <div className="text-right">
             <div className="text-[10px] text-secondary/70 uppercase font-bold tracking-widest leading-none mb-1">Ready Queue</div>
@@ -109,21 +109,23 @@ export default function GanttChart({ trace, numCores, totalTime }) {
       </header>
 
       {/* Gantt Area */}
-      <div className="p-6 glass-card overflow-x-auto min-h-[300px]">
+      <div className="p-6 bg-card/50 border border-white/5 backdrop-blur-xl rounded-2xl shadow-2xl inset: 1px
+  border-radius: inherit
+  border: 1px dashed rgba(255, 255, 255, 0.15) overflow-x-auto min-h-[300px]">
         <div className="min-w-[800px] flex flex-col gap-4">
           {coreSegments.map((segments, coreIdx) => (
             <div key={coreIdx} className="flex items-center gap-4">
-              <div className="w-24 shrink-0 font-bold text-sm text-white/60 flex items-center gap-2">
+              <div className="w-24 shrink-0 font-bold text-sm text-mtx3 flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-primary" />
                 CORE {coreIdx}
               </div>
               
-              <div className="relative flex-1 bg-white/5 rounded-xl h-14 border border-white/5 overflow-hidden">
+              <div className="relative flex-1 bg-mtx1 rounded-xl h-14 border border-mtx1 overflow-hidden">
                 {/* Time Dividers */}
                 {Array.from({ length: 10 }).map((_, i) => (
                   <div 
                     key={i} 
-                    className="absolute top-0 bottom-0 border-r border-white/5" 
+                    className="absolute top-0 bottom-0 border-r border-mtx1" 
                     style={{ left: `${(i + 1) * 10}%` }}
                   />
                 ))}
@@ -152,7 +154,7 @@ export default function GanttChart({ trace, numCores, totalTime }) {
           ))}
 
           {/* X-Axis labels */}
-          <div className="flex ml-28 mt-4 justify-between px-4 text-[10px] text-white/50 font-mono font-bold tracking-tighter">
+          <div className="flex ml-28 mt-4 justify-between px-4 text-[10px] text-mtx3 font-mono font-bold tracking-tighter">
             {Array.from({ length: 11 }).map((_, i) => (
               <span key={i}>{Math.round((Math.max(trace.length, 100) / 10) * i)} ms</span>
             ))}
