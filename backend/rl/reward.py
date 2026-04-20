@@ -21,11 +21,11 @@ class RewardEngine:
         self.w_idle_penalty = 0.05    
         
         # Context switch dynamic weights
-        self.w_context_good = 0.005    # Switched to lower-predicted job
-        self.w_context_bad = 0.05      # Unnecessary/worse switch
+        self.w_context_good = 0.05     # Slightly reward switching to shorter job
+        self.w_context_bad = 1.0       # Heavy penalty to prevent thrashing
         
         self.w_starvation = 0.02      
-        self.w_pred_burst = 0.05       # Penalty constant for running long jobs
+        self.w_pred_burst = 0.005      # Very small penalty for running long jobs (to gently nudge SJF)
 
         self.starvation_threshold = 100
         self.prev_context_switches = 0

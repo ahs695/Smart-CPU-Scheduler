@@ -65,8 +65,11 @@ class PPOTrainer:
         self.num_cores = num_cores
         self.total_timesteps = total_timesteps
         
-        # Suffix the path by mode
-        self.model_path = f"{model_path}_{self.mode}"
+        # Suffix the path by mode (ppo -> ppo_scheduler, hybrid -> ppo_scheduler_hybrid)
+        if self.mode == "ppo":
+            self.model_path = model_path
+        else:
+            self.model_path = f"{model_path}_{self.mode}"
 
         os.makedirs("models", exist_ok=True)
         

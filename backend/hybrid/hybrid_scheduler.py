@@ -189,6 +189,9 @@ class HybridSchedulingEnv(SchedulingEnv):
             if c.current_process and c.current_process not in pool:
                 pool.append(c.current_process)
 
+        # Sort pool to stabilize state mapping
+        pool.sort(key=lambda p: (p.arrival_time, p.pid))
+
         process_features = []
         MAX_WAIT = 1000.0
         MAX_TIME = float(self.max_steps)

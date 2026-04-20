@@ -144,17 +144,20 @@ class MultiCoreSimulator:
 
             finished = core.execute(self.time, time_slice=1)
 
-            # Gantt logging
-            if core.current_process:
+            if finished:
+                completed.append(finished)
+                self.completed_processes.append(finished)
+
+            # Gantt logging — log the PID that was running DURING this tick
+            # (finished processes were running this tick, so log them too)
+            if finished:
+                self.gantt_chart[core.core_id].append(finished.pid)
+            elif core.current_process:
                 self.gantt_chart[core.core_id].append(
                     core.current_process.pid
                 )
             else:
                 self.gantt_chart[core.core_id].append(None)
-
-            if finished:
-                completed.append(finished)
-                self.completed_processes.append(finished)
 
         # 6️⃣ Advance time
         self.time += 1

@@ -35,7 +35,7 @@ MODELS = {
 }
 
 def load_models():
-    ppo_path = "models/ppo_scheduler_ppo.zip"
+    ppo_path = "models/ppo_scheduler.zip"
     hybrid_path = "models/ppo_scheduler_hybrid.zip"
     lstm_path = "models/lstm_model.pt"
 

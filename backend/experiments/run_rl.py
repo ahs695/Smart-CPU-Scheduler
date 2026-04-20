@@ -28,7 +28,7 @@ from backend.hybrid.hybrid_scheduler import HybridSchedulingEnv
 from backend.simulator.metrics import MetricsEngine
 
 # Model paths
-PPO_MODEL_PATH    = "models/ppo_scheduler_ppo.zip"
+PPO_MODEL_PATH    = "models/ppo_scheduler.zip"
 HYBRID_MODEL_PATH = "models/ppo_scheduler_hybrid.zip"
 HYBRID_LEGACY_PATH = "models/ppo_scheduler.zip"
 LSTM_MODEL_PATH   = "models/lstm_model.pt"
