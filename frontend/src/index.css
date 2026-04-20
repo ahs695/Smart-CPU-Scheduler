@@ -1,18 +1,30 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: #0a0a0c;
-  --color-card: #141417;
-  --color-primary: #3b82f6;
-  --color-secondary: #10b981;
-  --color-accent: #8b5cf6;
-  
+  --color-background: #ffffff;
+ --color-bg: #ffffff;          
+--color-card: #f5f7f6;       
+--color-primary: #16a34a;    
+--color-secondary: #22c55e;  
+--color-accent: #4ade80;    
+--color-text: #111111;       
+--color-text-muted: #4b5563;
+--color-border: #e5e7eb;     
   --font-sans: "Inter", "system-ui", "sans-serif";
+  --accent: #16a34a;           /* main green */
+--accent-bg: #dcfce7;        /* light green background */
+--accent-border: #15803d;    /* darker green for hover */
+
+--text-h: #111111;           /* primary text (near black) */
+--border: #e5e7eb;           /* subtle light border */
+--social-bg: #f0fdf4;        /* very light green tint */
+
+--shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
 @layer base {
   body {
-    @apply bg-background text-white antialiased selection:bg-primary/30;
+    @apply bg-background text-gray-600 antialiased selection:bg-primary/30;
   }
 }
 
@@ -26,15 +38,15 @@
   }
 
   .btn-primary {
-    @apply bg-primary hover:bg-primary/80 text-white font-medium px-6 py-2 rounded-xl transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none;
+    @apply bg-primary hover:bg-primary/80 text-gray-600 font-medium px-6 py-2 rounded-xl transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none;
   }
 }
 
 /* Custom Gantt Styles */
 .gantt-row {
-  @apply relative h-12 border-b border-white/5 w-full;
+  @apply relative h-12 border-b border-green-400 w-full;
 }
 
 .gantt-block {
-  @apply absolute h-8 top-2 rounded-md flex items-center justify-center text-[10px] font-bold text-white shadow-lg cursor-pointer transition-transform hover:scale-105;
+  @apply absolute h-8 top-2 rounded-md flex items-center justify-center text-[10px] font-bold text-black shadow-lg cursor-pointer transition-transform hover:scale-105;
 }

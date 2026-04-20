@@ -2,6 +2,7 @@
   font-size: 16px;
   padding: 5px 10px;
   border-radius: 5px;
+  font-family: Verdana, Geneva, Tahoma, sans-serif;
   color: var(--accent);
   background: var(--accent-bg);
   border: 2px solid transparent;
@@ -58,7 +59,7 @@
 
 #center {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 25px;
   place-content: center;
   place-items: center;
@@ -155,7 +156,7 @@
 
 #spacer {
   height: 88px;
-  border-top: 1px solid var(--border);
+  border-top: 1px #efefef var(--border);
   @media (max-width: 1024px) {
     height: 48px;
   }
