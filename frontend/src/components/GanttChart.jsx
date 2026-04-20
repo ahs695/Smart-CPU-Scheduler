@@ -9,7 +9,7 @@ const COLORS = [
 ];
 
 export default function GanttChart({ trace, numCores, totalTime }) {
-  const [currentTime, setCurrentTime] = useState(0);
+  const [currentTime, setCurrentTime] = useState(-1);
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   
@@ -70,7 +70,7 @@ export default function GanttChart({ trace, numCores, totalTime }) {
           </button>
           
           <button 
-            onClick={() => { setCurrentTime(0); setIsPlaying(false); }}
+            onClick={() => { setCurrentTime(-1); setIsPlaying(false); }}
             className="p-3 rounded-full hover:bg-white/5 transition-colors"
           >
             <RotateCcw size={20} />
@@ -96,7 +96,7 @@ export default function GanttChart({ trace, numCores, totalTime }) {
         <div className="flex items-center gap-6">
           <div className="text-right">
             <div className="text-[10px] text-primary/70 uppercase font-bold tracking-widest leading-none mb-1">Simulation Time</div>
-            <div className="text-2xl font-mono text-primary font-bold">{currentTime} <span className="text-sm text-white/30">/ {trace.length - 1}</span></div>
+            <div className="text-2xl font-mono text-primary font-bold">{currentTime + 1} <span className="text-sm text-white/30">/ {trace.length}</span></div>
           </div>
           
           <div className="h-10 w-px bg-white/10" />

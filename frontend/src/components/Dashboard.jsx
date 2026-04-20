@@ -25,7 +25,23 @@ export default function Dashboard() {
           schedulerService.getLSTMPredictions(),
           schedulerService.checkStatus()
         ]);
-        setComparisonData(comp.data);
+        // Transform new { comparison: { FCFS: {metrics:...}, ... } } shape
+        // into the flat array the UI components expect.
+        const raw = comp.data;
+        if (raw && raw.comparison) {
+          const arr = Object.entries(raw.comparison)
+            .filter(([, v]) => v.metrics)           // skip errored schedulers
+            .map(([name, v]) => ({
+              name,
+              waiting:    v.metrics.avg_waiting_time    ?? 0,
+              turnaround: v.metrics.avg_turnaround_time ?? 0,
+              fairness:   v.metrics.fairness_index      ?? 0,
+            }));
+          setComparisonData(arr);
+        } else {
+          // Legacy format (plain array) — use as-is
+          setComparisonData(Array.isArray(raw) ? raw : []);
+        }
         setRewardData(rew.data);
         setLstmSamples(lstm.data);
         setBackendStatus('online');

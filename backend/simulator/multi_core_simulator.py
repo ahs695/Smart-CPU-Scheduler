@@ -82,7 +82,9 @@ class MultiCoreSimulator:
 
     def _all_completed(self):
 
-        return len(self.completed_processes) >= len(self.processes)
+        # Use strict equality: if completed exceeds processes, something has
+        # been double-appended and we want that to surface, not be masked.
+        return len(self.completed_processes) == len(self.processes)
 
     # ------------------------------------------------------------
 

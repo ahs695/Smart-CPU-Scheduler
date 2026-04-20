@@ -89,19 +89,22 @@ def run_rl_sim(mode, processes, num_cores):
     trace = []
     
     while True:
-        # Capture step trace BEFORE stepping
+        tick_time = env.simulator.time
+        action, _ = model.predict(state, deterministic=True)
+        state, _, terminated, truncated, _ = env.step(action)
+        
+        # Capture trace AFTER stepping — use gantt_chart for the PID that
+        # actually ran during this tick (avoids phantom idle after completion)
+        sim = env.simulator
         current_state = {
-            "time": env.simulator.time,
-            "ready_queue": [p.pid for p in env.simulator.ready_queue],
+            "time": tick_time,
+            "ready_queue": [p.pid for p in sim.ready_queue],
             "cores": [
-                {"id": c.core_id, "pid": c.current_process.pid if c.current_process else None}
-                for c in env.simulator.cores
+                {"id": c.core_id, "pid": sim.gantt_chart[c.core_id][-1] if sim.gantt_chart[c.core_id] else None}
+                for c in sim.cores
             ]
         }
         trace.append(current_state)
-        
-        action, _ = model.predict(state, deterministic=True)
-        state, _, terminated, truncated, _ = env.step(action)
         
         if terminated or truncated:
             break
@@ -123,19 +126,21 @@ def run_traditional_sim(scheduler, processes, num_cores):
     )
     
     trace = []
-    # Intercept simulator steps for tracing
     sim.reset()
     while not sim._all_completed() and sim.time < 5000: # Safety cap
+        tick_time = sim.time
+        sim.step()
+        # Capture trace AFTER step() — use gantt_chart for the PID that
+        # actually ran during this tick (avoids phantom idle after completion)
         current_state = {
-            "time": sim.time,
+            "time": tick_time,
             "ready_queue": [p.pid for p in sim.ready_queue],
             "cores": [
-                {"id": c.core_id, "pid": c.current_process.pid if c.current_process else None}
+                {"id": c.core_id, "pid": sim.gantt_chart[c.core_id][-1] if sim.gantt_chart[c.core_id] else None}
                 for c in sim.cores
             ]
         }
         trace.append(current_state)
-        sim.step()
         
     metrics = MetricsEngine.summarize(sim.processes, sim.cores, sim.time)
     
@@ -195,18 +200,68 @@ def simulate():
 
     return jsonify(result)
 
-@app.route("/compare", methods=["GET"])
+def _parse_processes(process_data):
+    processes = []
+    for p in process_data or []:
+        processes.append(Process(
+            pid=p.get("pid", 0),
+            arrival_time=p.get("arrival", 0),
+            burst_time=p.get("burst", 5),
+            priority=p.get("priority", 0),
+        ))
+    return processes
+
+def _safe_metrics(runner):
+    """Runs a scheduler, returns metrics or an error record. Never raises."""
+    try:
+        result = runner()
+        if result is None:
+            return {"error": "model_unavailable"}
+        return {"metrics": result["metrics"], "total_time": result["metrics"]["total_time"]}
+    except Exception as exc:
+        return {"error": f"{type(exc).__name__}: {exc}"}
+
+@app.route("/compare", methods=["GET", "POST"])
 def compare():
-    # In a real scenario, this would aggregate from results/*.csv
-    # Here we return a high-level summary for the dashboard comparison view
-    summary = [
-        {"name": "FCFS", "waiting": 45.2, "turnaround": 72.1, "fairness": 0.85},
-        {"name": "SJF", "waiting": 32.5, "turnaround": 58.4, "fairness": 0.78},
-        {"name": "RR", "waiting": 38.1, "turnaround": 65.2, "fairness": 0.92},
-        {"name": "PPO", "waiting": 28.4, "turnaround": 52.1, "fairness": 0.88},
-        {"name": "HYBRID", "waiting": 22.1, "turnaround": 45.3, "fairness": 0.95},
-    ]
-    return jsonify(summary)
+    """
+    Run every scheduler on the same input and return live metrics.
+
+    POST body (preferred):
+        { "processes": [...], "num_cores": 2, "quantum": 2 }
+
+    If called with GET or with no processes, a small mixed workload is
+    generated so the dashboard stays functional.
+    """
+    data = request.get_json(silent=True) or {}
+    num_cores = int(data.get("num_cores", 2))
+    quantum = int(data.get("quantum", 2))
+
+    processes = _parse_processes(data.get("processes"))
+    if not processes:
+        processes = WorkloadGenerator.mixed(10)
+
+    # RL/Hybrid models were trained at 2 cores; force that to get honest numbers
+    rl_cores = 2 if num_cores != 2 else num_cores
+
+    schedulers = {
+        "FCFS":   lambda: run_traditional_sim(FCFSScheduler(), processes, num_cores),
+        "SJF":    lambda: run_traditional_sim(SJFScheduler(preemptive=True), processes, num_cores),
+        "RR":     lambda: run_traditional_sim(RoundRobinScheduler(quantum=quantum), processes, num_cores),
+        "MLFQ":   lambda: run_traditional_sim(MLFQScheduler(), processes, num_cores),
+        "PPO":    lambda: run_rl_sim("ppo", processes, rl_cores),
+        "Hybrid": lambda: run_rl_sim("hybrid", processes, rl_cores),
+    }
+
+    comparison = {name: _safe_metrics(runner) for name, runner in schedulers.items()}
+
+    return jsonify({
+        "comparison": comparison,
+        "input": {
+            "num_cores": num_cores,
+            "num_processes": len(processes),
+            "total_burst": sum(p.burst_time for p in processes),
+        },
+    })
 
 @app.route("/reward-curve", methods=["GET"])
 def reward_curve():

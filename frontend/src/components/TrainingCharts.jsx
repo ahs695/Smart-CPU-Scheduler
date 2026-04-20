@@ -93,12 +93,22 @@ export function LSTMPredictionChart({ data }) {
 }
 
 export function ComparisonChart({ data }) {
+  const chartData = Array.isArray(data) ? data : [];
+  
+  if (chartData.length === 0) {
+    return (
+      <div className="glass-card p-6 h-[400px] flex items-center justify-center">
+        <p className="text-sm text-white/30 italic">No comparison data available yet.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="glass-card p-6 h-[400px]">
       <h3 className="text-sm font-bold uppercase tracking-widest text-primary/80 mb-6">Architecture performance benchmark</h3>
       
       <ResponsiveContainer width="100%" height="80%">
-        <LineChart data={data}>
+        <LineChart data={chartData}>
           <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
           <XAxis 
             dataKey="name" 
