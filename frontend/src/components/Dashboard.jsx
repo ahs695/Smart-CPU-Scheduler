@@ -10,22 +10,22 @@ export default function Dashboard() {
   const [simulationData, setSimulationData] = useState(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const [comparisonData, setComparisonData] = useState([]);
+  const [isComparing, setIsComparing] = useState(false);
   const [rewardData, setRewardData] = useState([]);
   const [lstmSamples, setLstmSamples] = useState([]);
   const [backendStatus, setBackendStatus] = useState('loading');
   const [error, setError] = useState(null);
   const [showMetricsTable, setShowMetricsTable] = useState(false);
+  const [lastSimConfig, setLastSimConfig] = useState(null);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [comp, rew, lstm, status] = await Promise.all([
-          schedulerService.getCompare(),
+        const [rew, lstm, status] = await Promise.all([
           schedulerService.getRewardCurve(),
           schedulerService.getLSTMPredictions(),
           schedulerService.checkStatus()
         ]);
-        setComparisonData(comp.data);
         setRewardData(rew.data);
         setLstmSamples(lstm.data);
         setBackendStatus('online');
@@ -37,12 +37,41 @@ export default function Dashboard() {
     fetchData();
   }, []);
 
+  const fetchComparison = async (config) => {
+    setIsComparing(true);
+    try {
+      const comp = await schedulerService.compareProcesses({
+        processes: config.processes,
+        num_cores: config.num_cores,
+      });
+      const raw = comp.data;
+      if (raw && raw.comparison) {
+        const arr = Object.entries(raw.comparison)
+          .filter(([, v]) => v.metrics)
+          .map(([name, v]) => ({
+            name,
+            waiting:    v.metrics.avg_waiting_time    ?? 0,
+            turnaround: v.metrics.avg_turnaround_time ?? 0,
+            fairness:   v.metrics.fairness_index      ?? 0,
+          }));
+        setComparisonData(arr);
+      }
+    } catch (err) {
+      console.error("Failed to fetch comparison data", err);
+    } finally {
+      setIsComparing(false);
+    }
+  };
+
   const handleSimulate = async (config) => {
     setIsSimulating(true);
     setError(null);
     try {
       const response = await schedulerService.simulate(config);
       setSimulationData(response.data);
+      setLastSimConfig(config);
+      // Fetch fresh comparison for the same processes
+      fetchComparison(config);
     } catch (err) {
       setError(err.response?.data?.error || "Simulation failed. Please check if the backend is running.");
       console.error(err);
@@ -130,10 +159,16 @@ export default function Dashboard() {
                 
                 <div className="flex flex-col gap-4 mt-2">
                   <button 
-                    onClick={() => setShowMetricsTable(!showMetricsTable)}
-                    className="w-full sm:w-auto px-6 py-3 rounded-xl font-bold uppercase tracking-widest text-xs transition-all duration-300 border border-secondary/30 bg-secondary/10 text-secondary hover:bg-secondary/20 self-center"
+                    onClick={() => {
+                      setShowMetricsTable(!showMetricsTable);
+                      if (!showMetricsTable && comparisonData.length === 0 && lastSimConfig) {
+                        fetchComparison(lastSimConfig);
+                      }
+                    }}
+                    disabled={isComparing}
+                    className="w-full sm:w-auto px-6 py-3 rounded-xl font-bold uppercase tracking-widest text-xs transition-all duration-300 border border-secondary/30 bg-secondary/10 text-secondary hover:bg-secondary/20 self-center disabled:opacity-50"
                   >
-                    {showMetricsTable ? "Hide Metrics Comparison" : "Show Overall Metrics Comparison"}
+                    {isComparing ? "Comparing All Algorithms..." : showMetricsTable ? "Hide Metrics Comparison" : "Compare All Algorithms"}
                   </button>
                   {showMetricsTable && (
                     <div className="glass-card p-6 border border-white/10 rounded-xl overflow-x-auto animate-in fade-in slide-in-from-top-4">

@@ -33,6 +33,12 @@ class Core:
         Handles context switch counting.
         """
 
+        # Defensive: refuse to assign a process that has already completed.
+        # A completed process sitting on a core would produce a 0-length entry
+        # in execution_history on the next tick.
+        if process is not None and process.is_completed():
+            process = None
+
         if process is not None:
             process.current_core = self.core_id
 
@@ -58,6 +64,15 @@ class Core:
         """
 
         if self.current_process is None:
+            self.idle_time += time_slice
+            return None
+
+        # Defensive: a completed process should never sit on a core at execute().
+        # If it does, the underlying Process.execute() would append a 0 to
+        # execution_history (min(remaining=0, slice) = 0). Treat as idle and
+        # clear the core so the scheduler picks someone else next tick.
+        if self.current_process.is_completed():
+            self.current_process = None
             self.idle_time += time_slice
             return None
 

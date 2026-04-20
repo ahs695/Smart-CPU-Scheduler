@@ -12,6 +12,7 @@ const api = axios.create({
 export const schedulerService = {
   simulate: (data) => api.post('/simulate', data),
   getCompare: () => api.get('/compare'),
+  compareProcesses: (data) => api.post('/compare', data),
   getRewardCurve: () => api.get('/reward-curve'),
   getLSTMPredictions: () => api.get('/lstm-predictions'),
   checkStatus: () => api.get('/'),

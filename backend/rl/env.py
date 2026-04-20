@@ -141,6 +141,7 @@ class SchedulingEnv(gym.Env):
         """
         Extracts action array and maps precisely to each core.
         Enforces residency validation: One process, one core.
+        Guarantees no core idles while processes are available.
         """
         # Ensure every core has an entry (default to None/Idle)
         decisions = {core.core_id: None for core in cores}
@@ -150,6 +151,9 @@ class SchedulingEnv(gym.Env):
         for c in cores:
             if c.current_process and c.current_process not in pool:
                 pool.append(c.current_process)
+        
+        # Sort pool to stabilize action indexing
+        pool.sort(key=lambda p: (p.arrival_time, p.pid))
                 
         if not pool:
             return decisions
@@ -195,6 +199,15 @@ class SchedulingEnv(gym.Env):
             # Valid assignment!
             decisions[core.core_id] = selected_process
             assigned_pids.add(selected_process.pid)
+
+        # Final sweep: fill any idle cores with unassigned processes (prevent artificial gaps)
+        for core in cores:
+            if decisions[core.core_id] is None:
+                for p in pool:
+                    if p.pid not in assigned_pids:
+                        decisions[core.core_id] = p
+                        assigned_pids.add(p.pid)
+                        break
             
         return decisions
 
@@ -205,6 +218,9 @@ class SchedulingEnv(gym.Env):
         for c in self.simulator.cores:
             if c.current_process and c.current_process not in pool:
                 pool.append(c.current_process)
+
+        # Sort pool to stabilize state mapping
+        pool.sort(key=lambda p: (p.arrival_time, p.pid))
 
         # 1. Per-process states
         process_features = []
