@@ -32,12 +32,14 @@ export function RewardCurve({ data }) {
             fontSize={10} 
             tickLine={false} 
             axisLine={false}
+            label={{ value: 'Training Episode', position: 'insideBottom', offset: -5, fill: '#ffffff40', fontSize: 10, fontWeight: 'bold' }}
           />
           <YAxis 
             stroke="#ffffff20" 
             fontSize={10} 
             tickLine={false} 
             axisLine={false}
+            label={{ value: 'Total Reward', angle: -90, position: 'insideLeft', offset: 10, fill: '#ffffff40', fontSize: 10, fontWeight: 'bold' }}
           />
           <Tooltip 
             contentStyle={{ backgroundColor: '#141417', border: '1px solid #ffffff10', borderRadius: '8px' }}
@@ -72,13 +74,14 @@ export function LSTMPredictionChart({ data }) {
             fontSize={10} 
             tickLine={false} 
             axisLine={false}
+            label={{ value: 'Sample ID', position: 'insideBottom', offset: -5, fill: '#ffffff40', fontSize: 10, fontWeight: 'bold' }}
           />
           <YAxis 
             stroke="#ffffff20" 
             fontSize={10} 
             tickLine={false} 
             axisLine={false}
-            label={{ value: 'Burst Length (ms)', angle: -90, position: 'insideLeft', fill: '#ffffff20', fontSize: 10 }}
+            label={{ value: 'Burst Length (ms)', angle: -90, position: 'insideLeft', offset: 10, fill: '#ffffff40', fontSize: 10, fontWeight: 'bold' }}
           />
           <Tooltip 
             cursor={{ strokeDasharray: '3 3' }}
@@ -97,8 +100,12 @@ export function ComparisonChart({ data }) {
   
   if (chartData.length === 0) {
     return (
-      <div className="glass-card p-6 h-[400px] flex items-center justify-center">
-        <p className="text-sm text-white/30 italic">No comparison data available yet.</p>
+      <div className="glass-card p-6 h-[400px]">
+        <h3 className="text-sm font-bold uppercase tracking-widest text-primary/80 mb-6">Architecture performance benchmark</h3>
+        <div className="flex flex-col items-center justify-center h-[80%] opacity-50">
+          <p className="text-sm font-medium">No Data Available</p>
+          <p className="text-xs text-white/30 italic mt-2">Run a simulation to see performance comparisons here.</p>
+        </div>
       </div>
     );
   }
@@ -116,12 +123,14 @@ export function ComparisonChart({ data }) {
             fontSize={10} 
             tickLine={false} 
             axisLine={false}
+            label={{ value: 'Scheduling Algorithm', position: 'insideBottom', offset: -5, fill: '#ffffff40', fontSize: 10, fontWeight: 'bold' }}
           />
           <YAxis 
             stroke="#ffffff20" 
             fontSize={10} 
             tickLine={false} 
             axisLine={false}
+            label={{ value: 'Time (ms)', angle: -90, position: 'insideLeft', offset: 10, fill: '#ffffff40', fontSize: 10, fontWeight: 'bold' }}
           />
           <Tooltip 
             contentStyle={{ backgroundColor: '#141417', border: '1px solid #ffffff10', borderRadius: '8px' }}
