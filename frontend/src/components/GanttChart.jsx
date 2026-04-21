@@ -153,18 +153,9 @@ export default function GanttChart({ trace, numCores, totalTime }) {
 
       {/* Gantt Area with zoom */}
       {/* Gantt Area with zoom */}
-<div
-  ref={chartWrapperRef}
-  onMouseDown={handleMouseDown}
-  onMouseMove={handleMouseMove}
-  onMouseUp={handleMouseUp}
-  onMouseLeave={handleMouseUp}
-  className="relative p-6 bg-card/50 border border-white/5 backdrop-blur-xl rounded-2xl shadow-2xl min-h-[300px]"
-  style={{ 
-    cursor: zoom > 1 ? 'grab' : 'default',
-    overflow: 'hidden',   // clips zoomed content to this fixed box
-  }}
->
+{/* Gantt Area — horizontal stretch zoom */}
+<div className="relative p-6 bg-card/50 border border-white/5 backdrop-blur-xl rounded-2xl shadow-2xl min-h-[300px]">
+  
   {/* Zoom controls overlay */}
   <div className="absolute top-3 right-3 z-20 flex items-center gap-1 bg-black/30 backdrop-blur-sm rounded-xl px-2 py-1 border border-white/10">
     <button
@@ -188,41 +179,80 @@ export default function GanttChart({ trace, numCores, totalTime }) {
     <button
       onClick={resetZoom}
       className="p-1.5 rounded-lg hover:bg-white/10 text-mtx3 hover:text-white transition-colors"
-      title="Reset Zoom"
+      title="Reset"
     >
       <Maximize2 size={14} />
     </button>
   </div>
 
-  {/* Zoom hint */}
   {zoom === 1 && (
     <div className="absolute bottom-3 right-3 z-20 text-[9px] text-mtx2 font-medium italic flex items-center gap-1 pointer-events-none">
       <ZoomIn size={10} /> Scroll to zoom · Drag to pan
     </div>
   )}
 
-  {/* 
-    This wrapper is FULL width/height of the container always.
-    scale() grows the content visually inside the clipped box.
-    translateX handles panning after zoom.
-    transformOrigin: 'center top' so zoom anchors to top-center, not corner.
-  */}
-  <div
-    style={{
-      width: '100%',
-      transformOrigin: 'center top',
-      transform: `scale(${zoom}) translateX(${panX}px)`,
-      transition: isPanning.current ? 'none' : 'transform 0.15s ease',
-    }}
-  >
-    <div className="flex flex-col gap-4">
-      {coreSegments.map((segments, coreIdx) => (
-        <div key={coreIdx} className="flex items-center gap-4">
-          <div className="w-24 shrink-0 font-bold text-sm text-mtx3 flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-primary" />
-            CORE {coreIdx}
-          </div>
-          <div className="relative flex-1 bg-mtx1 rounded-xl h-14 border border-mtx1 overflow-hidden">
+  <div className="flex flex-col gap-4">
+    {coreSegments.map((segments, coreIdx) => (
+      <div key={coreIdx} className="flex items-center gap-4">
+        
+        {/* Core label — always fixed, never scrolls */}
+        <div className="w-24 shrink-0 font-bold text-sm text-mtx3 flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-primary" />
+          CORE {coreIdx}
+        </div>
+
+        {/* Track container — fixed visible width, clips overflow */}
+        <div
+          ref={chartWrapperRef}
+          className="relative flex-1 bg-mtx1 rounded-xl h-14 border border-mtx1"
+          style={{ overflow: 'hidden' }}
+          onWheel={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const delta = e.deltaY < 0 ? 0.25 : -0.25;
+            setZoom(prev => {
+              const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, prev + delta));
+              if (next === MIN_ZOOM) setPanX(0);
+              return next;
+            });
+          }}
+          onMouseDown={(e) => {
+            if (zoom <= 1) return;
+            isPanning.current = true;
+            panStart.current = { x: e.clientX, panX };
+            e.currentTarget.style.cursor = 'grabbing';
+          }}
+          onMouseMove={(e) => {
+            if (!isPanning.current) return;
+            const trackWidth = e.currentTarget.offsetWidth;
+            const maxPan = trackWidth * (zoom - 1);
+            const dx = e.clientX - panStart.current.x;
+            setPanX(Math.min(0, Math.max(-maxPan, panStart.current.panX + dx)));
+          }}
+          onMouseUp={(e) => {
+            isPanning.current = false;
+            e.currentTarget.style.cursor = zoom > 1 ? 'grab' : 'default';
+          }}
+          onMouseLeave={(e) => {
+            isPanning.current = false;
+            e.currentTarget.style.cursor = zoom > 1 ? 'grab' : 'default';
+          }}
+          style={{
+            overflow: 'hidden',
+            cursor: zoom > 1 ? 'grab' : 'default',
+          }}
+        >
+          {/* Inner track — this is what stretches horizontally */}
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              bottom: 0,
+              left: `${panX}px`,
+              width: `${zoom * 100}%`,   // stretches with zoom
+            }}
+          >
+            {/* Time dividers */}
             {Array.from({ length: 10 }).map((_, i) => (
               <div
                 key={i}
@@ -230,37 +260,65 @@ export default function GanttChart({ trace, numCores, totalTime }) {
                 style={{ left: `${(i + 1) * 10}%` }}
               />
             ))}
+
+            {/* Process blocks */}
             <AnimatePresence>
               {segments.map((seg) => (
                 <motion.div
                   key={`${seg.pid}-${seg.start}`}
                   initial={{ scaleX: 0, opacity: 0 }}
                   animate={{ scaleX: 1, opacity: 1 }}
-                  className="absolute top-1 bottom-1 rounded-lg flex items-center justify-center text-[6px] font-bold shadow-lg"
+                  className="absolute top-1 bottom-1 rounded-lg flex items-center justify-center shadow-lg overflow-hidden"
                   style={{
                     left: `${(seg.start / Math.max(trace.length, 100)) * 100}%`,
                     width: `${((seg.end - seg.start + 1) / Math.max(trace.length, 100)) * 100}%`,
                     backgroundColor: seg.color,
-                    zIndex: 10
+                    zIndex: 10,
                   }}
                 >
-                  P{seg.pid}
+                  <span className="text-[10px] font-bold text-white whitespace-nowrap select-none"
+                    style={{ textShadow: '0 1px 3px rgba(0,0,0,0.5)' }}
+                  >
+                    P{seg.pid}
+                  </span>
                 </motion.div>
               ))}
             </AnimatePresence>
           </div>
         </div>
-      ))}
+      </div>
+    ))}
 
-      {/* X-Axis */}
-      <div className="flex ml-28 mt-4 justify-between px-4 text-[10px] text-mtx3 font-mono font-bold tracking-tighter">
-        {Array.from({ length: 11 }).map((_, i) => (
-          <span key={i}>{Math.round((Math.max(trace.length, 100) / 10) * i)} ms</span>
-        ))}
+    {/* X-Axis — also stretches and pans with zoom */}
+    <div className="flex items-center gap-4">
+      {/* Spacer matching core label width */}
+      <div className="w-24 shrink-0" />
+
+      {/* Timeline container — clips and pans same as tracks */}
+      <div className="relative flex-1 overflow-hidden">
+        <div
+          style={{
+            position: 'relative',
+            left: `${panX}px`,
+            width: `${zoom * 100}%`,
+            display: 'flex',
+            justifyContent: 'space-between',
+            paddingLeft: '4px',
+            paddingRight: '4px',
+          }}
+        >
+          {Array.from({ length: 11 }).map((_, i) => (
+            <span key={i} className="text-[10px] text-mtx3 font-mono font-bold tracking-tighter">
+              {Math.round((Math.max(trace.length, 100) / 10) * i)} ms
+            </span>
+          ))}
+        </div>
       </div>
     </div>
+
   </div>
+</div>
           </div>
-        </div>
+        
   );
 }

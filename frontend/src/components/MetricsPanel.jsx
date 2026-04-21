@@ -22,7 +22,13 @@ export default function MetricsPanel({ metrics }) {
         
         // Formatting
         const displayValue = typeof value === 'number' 
-          ? (key === 'cpu_utilization' ? (value * 100).toFixed(1) : value.toFixed(2))
+          ? key === 'cpu_utilization'
+            ? (value * 100).toFixed(3)
+            : key === 'context_switches'
+            ? Math.round(value).toString()
+            : key === 'fairness_index' || key === 'throughput'
+            ? value.toFixed(3)
+            : value.toFixed(2)
           : value;
 
         return (

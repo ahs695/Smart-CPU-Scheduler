@@ -198,8 +198,8 @@ export default function InputPanel({ onSimulate, isSimulating }) {
             <tbody>
               {processes.map((p, i) => (
                 <tr key={i} className="border-b border-mtx1 group hover:bg-gray-200 transition-colors">
-                  <td className="px-4 py-3 font-mono text-primary font-bold">P{p.pid}</td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3 font-mono text-primary font-bold">P{p.pid}</td>
+                  <td className="px-3 py-3">
                     <input 
                       type="number" 
                       value={p.arrival}
@@ -207,7 +207,7 @@ export default function InputPanel({ onSimulate, isSimulating }) {
                       className="w-16 bg-transparent border-none focus:ring-0 font-mono text-mtx5"
                     />
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3">
                     <input 
                       type="number" 
                       value={p.burst}
@@ -215,7 +215,7 @@ export default function InputPanel({ onSimulate, isSimulating }) {
                       className="w-16 bg-transparent border-none focus:ring-0 font-mono text-mtx5"
                     />
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3">
                     <input 
                       type="number" 
                       value={p.priority}
@@ -223,7 +223,7 @@ export default function InputPanel({ onSimulate, isSimulating }) {
                       className="w-16 bg-transparent border-none focus:ring-0 font-mono text-mtx5"
                     />
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-1 py-3 ">
                     <button 
                       onClick={() => removeProcess(i)}
                       className="p-2 text-mtx2 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
