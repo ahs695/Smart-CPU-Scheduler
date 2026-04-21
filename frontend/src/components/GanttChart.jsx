@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Play, Pause, RotateCcw, FastForward, Info } from 'lucide-react';
+import { Play, Pause, RotateCcw, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 const COLORS = [
@@ -12,8 +12,60 @@ export default function GanttChart({ trace, numCores, totalTime }) {
   const [currentTime, setCurrentTime] = useState(-1);
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
-  
-  // Playback control
+
+  // Zoom state
+  const [zoom, setZoom] = useState(1);
+  const [panX, setPanX] = useState(0);
+  const isPanning = useRef(false);
+  const panStart = useRef({ x: 0, panX: 0 });
+  const chartWrapperRef = useRef(null);
+
+  const MIN_ZOOM = 1;
+  const MAX_ZOOM = 6;
+
+  // Wheel to zoom, scoped to chart area only
+  const handleWheel = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const delta = e.deltaY < 0 ? 0.15 : -0.15;
+    setZoom(prev => {
+      const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, prev + delta));
+      // Reset pan if zoomed all the way out
+      if (next === MIN_ZOOM) setPanX(0);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const el = chartWrapperRef.current;
+    if (!el) return;
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, [handleWheel]);
+
+  // Mouse drag to pan (only when zoomed in)
+  const handleMouseDown = (e) => {
+    if (zoom <= 1) return;
+    isPanning.current = true;
+    panStart.current = { x: e.clientX, panX };
+    e.currentTarget.style.cursor = 'grabbing';
+  };
+
+  const handleMouseMove = (e) => {
+    if (!isPanning.current) return;
+    const dx = e.clientX - panStart.current.x;
+    const maxPan = (chartWrapperRef.current?.offsetWidth * (zoom - 1)) / 2 || 0;
+    setPanX(Math.min(maxPan, Math.max(-maxPan, panStart.current.panX + dx)));
+  };
+
+  const handleMouseUp = (e) => {
+    isPanning.current = false;
+    e.currentTarget.style.cursor = zoom > 1 ? 'grab' : 'default';
+  };
+
+  const resetZoom = () => { setZoom(1); setPanX(0); };
+
+  // Playback
   useEffect(() => {
     let timer;
     if (isPlaying && currentTime < trace.length - 1) {
@@ -28,19 +80,14 @@ export default function GanttChart({ trace, numCores, totalTime }) {
 
   const currentState = trace[currentTime] || { cores: [], time: 0, ready_queue: [] };
 
-  // Calculate blocks for the Gantt Visualization
-  // We need to transform the flat trace into a list of "segments" for each core
   const coreSegments = useMemo(() => {
     const segments = Array.from({ length: numCores }, () => []);
-    
     for (let t = 0; t <= currentTime; t++) {
       const step = trace[t];
       if (!step) continue;
-      
       step.cores.forEach(c => {
         const coreId = c.id;
         if (coreId >= numCores) return;
-        
         const lastSegment = segments[coreId][segments[coreId].length - 1];
         if (lastSegment && lastSegment.pid === c.pid) {
           lastSegment.end = step.time;
@@ -59,27 +106,25 @@ export default function GanttChart({ trace, numCores, totalTime }) {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Controls */}
+      {/* Controls — unchanged */}
       <header className="flex items-center justify-between p-4 glass-card border border-mtx1 bg-card/30 backdrop-blur-md rounded-2xl shadow-xl">
         <div className="flex items-center gap-4">
-          <button 
+          <button
             onClick={() => setIsPlaying(!isPlaying)}
             className="p-3 rounded-full bg-primary/20 hover:bg-primary/30 text-primary transition-colors"
           >
             {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
           </button>
-          
-          <button 
+          <button
             onClick={() => { setCurrentTime(-1); setIsPlaying(false); }}
             className="p-3 rounded-full hover:bg-mtx2 transition-colors"
           >
             <RotateCcw size={20} />
           </button>
-
           <div className="flex items-center gap-2 ml-4">
             <span className="text-[10px] text-primary/80 uppercase font-bold tracking-widest">Playback Speed</span>
             {[1, 2, 5, 10].map(s => (
-              <button 
+              <button
                 key={s}
                 onClick={() => setSpeed(s)}
                 className={cn(
@@ -92,75 +137,130 @@ export default function GanttChart({ trace, numCores, totalTime }) {
             ))}
           </div>
         </div>
-
-        <div className="flex items-center gap-6">
-          <div className="text-right">
+          <div className="text-center">
             <div className="text-[10px] text-primary/70 uppercase font-bold tracking-widest leading-none mb-1">Simulation Time</div>
-            <div className="text-2xl font-mono text-primary font-bold">{currentTime + 1} <span className="text-sm text-mtx2">/ {trace.length}</span></div>
+            <div className="text-2xl font-mono text-primary font-bold">
+              {currentTime + 1} <span className="text-sm text-mtx2">/ {trace.length}</span>
+            </div>
           </div>
-          
-          <div className="h-10 w-px bg-mtx1" />
-          
-          <div className="text-right">
+          <div className="h-10 bg-mtx1">
+          <div className="text-center">
             <div className="text-[10px] text-secondary/70 uppercase font-bold tracking-widest leading-none mb-1">Ready Queue</div>
             <div className="text-2xl font-mono text-secondary font-bold">{currentState.ready_queue.length}</div>
           </div>
         </div>
       </header>
 
-      {/* Gantt Area */}
-      <div className="p-6 bg-card/50 border border-white/5 backdrop-blur-xl rounded-2xl shadow-2xl inset: 1px
-  border-radius: inherit
-  border: 1px dashed rgba(255, 255, 255, 0.15) overflow-x-auto min-h-[300px]">
-        <div className="min-w-[800px] flex flex-col gap-4">
-          {coreSegments.map((segments, coreIdx) => (
-            <div key={coreIdx} className="flex items-center gap-4">
-              <div className="w-24 shrink-0 font-bold text-sm text-mtx3 flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-primary" />
-                CORE {coreIdx}
-              </div>
-              
-              <div className="relative flex-1 bg-mtx1 rounded-xl h-14 border border-mtx1 overflow-hidden">
-                {/* Time Dividers */}
-                {Array.from({ length: 10 }).map((_, i) => (
-                  <div 
-                    key={i} 
-                    className="absolute top-0 bottom-0 border-r border-mtx1" 
-                    style={{ left: `${(i + 1) * 10}%` }}
-                  />
-                ))}
+      {/* Gantt Area with zoom */}
+      {/* Gantt Area with zoom */}
+<div
+  ref={chartWrapperRef}
+  onMouseDown={handleMouseDown}
+  onMouseMove={handleMouseMove}
+  onMouseUp={handleMouseUp}
+  onMouseLeave={handleMouseUp}
+  className="relative p-6 bg-card/50 border border-white/5 backdrop-blur-xl rounded-2xl shadow-2xl min-h-[300px]"
+  style={{ 
+    cursor: zoom > 1 ? 'grab' : 'default',
+    overflow: 'hidden',   // clips zoomed content to this fixed box
+  }}
+>
+  {/* Zoom controls overlay */}
+  <div className="absolute top-3 right-3 z-20 flex items-center gap-1 bg-black/30 backdrop-blur-sm rounded-xl px-2 py-1 border border-white/10">
+    <button
+      onClick={() => setZoom(z => Math.min(MAX_ZOOM, +(z + 0.5).toFixed(1)))}
+      className="p-1.5 rounded-lg hover:bg-white/10 text-mtx3 hover:text-white transition-colors"
+      title="Zoom In"
+    >
+      <ZoomIn size={14} />
+    </button>
+    <span className="text-[10px] font-mono font-bold text-mtx3 w-8 text-center">
+      {zoom.toFixed(1)}x
+    </span>
+    <button
+      onClick={() => setZoom(z => { const n = Math.max(MIN_ZOOM, +(z - 0.5).toFixed(1)); if (n === 1) setPanX(0); return n; })}
+      className="p-1.5 rounded-lg hover:bg-white/10 text-mtx3 hover:text-white transition-colors"
+      title="Zoom Out"
+    >
+      <ZoomOut size={14} />
+    </button>
+    <div className="w-px h-4 bg-white/10 mx-1" />
+    <button
+      onClick={resetZoom}
+      className="p-1.5 rounded-lg hover:bg-white/10 text-mtx3 hover:text-white transition-colors"
+      title="Reset Zoom"
+    >
+      <Maximize2 size={14} />
+    </button>
+  </div>
 
-                {/* Blocks */}
-                <AnimatePresence>
-                  {segments.map((seg, idx) => (
-                    <motion.div
-                      key={`${seg.pid}-${seg.start}`}
-                      initial={{ scaleX: 0, opacity: 0 }}
-                      animate={{ scaleX: 1, opacity: 1 }}
-                      className="absolute top-1 bottom-1 rounded-lg flex items-center justify-center text-[10px] font-bold shadow-lg"
-                      style={{
-                        left: `${(seg.start / Math.max(trace.length, 100)) * 100}%`,
-                        width: `${((seg.end - seg.start + 1) / Math.max(trace.length, 100)) * 100}%`,
-                        backgroundColor: seg.color,
-                        zIndex: 10
-                      }}
-                    >
-                      P{seg.pid}
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-              </div>
-            </div>
-          ))}
+  {/* Zoom hint */}
+  {zoom === 1 && (
+    <div className="absolute bottom-3 right-3 z-20 text-[9px] text-mtx2 font-medium italic flex items-center gap-1 pointer-events-none">
+      <ZoomIn size={10} /> Scroll to zoom · Drag to pan
+    </div>
+  )}
 
-          {/* X-Axis labels */}
-          <div className="flex ml-28 mt-4 justify-between px-4 text-[10px] text-mtx3 font-mono font-bold tracking-tighter">
-            {Array.from({ length: 11 }).map((_, i) => (
-              <span key={i}>{Math.round((Math.max(trace.length, 100) / 10) * i)} ms</span>
+  {/* 
+    This wrapper is FULL width/height of the container always.
+    scale() grows the content visually inside the clipped box.
+    translateX handles panning after zoom.
+    transformOrigin: 'center top' so zoom anchors to top-center, not corner.
+  */}
+  <div
+    style={{
+      width: '100%',
+      transformOrigin: 'center top',
+      transform: `scale(${zoom}) translateX(${panX}px)`,
+      transition: isPanning.current ? 'none' : 'transform 0.15s ease',
+    }}
+  >
+    <div className="flex flex-col gap-4">
+      {coreSegments.map((segments, coreIdx) => (
+        <div key={coreIdx} className="flex items-center gap-4">
+          <div className="w-24 shrink-0 font-bold text-sm text-mtx3 flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-primary" />
+            CORE {coreIdx}
+          </div>
+          <div className="relative flex-1 bg-mtx1 rounded-xl h-14 border border-mtx1 overflow-hidden">
+            {Array.from({ length: 10 }).map((_, i) => (
+              <div
+                key={i}
+                className="absolute top-0 bottom-0 border-r border-mtx1"
+                style={{ left: `${(i + 1) * 10}%` }}
+              />
             ))}
+            <AnimatePresence>
+              {segments.map((seg) => (
+                <motion.div
+                  key={`${seg.pid}-${seg.start}`}
+                  initial={{ scaleX: 0, opacity: 0 }}
+                  animate={{ scaleX: 1, opacity: 1 }}
+                  className="absolute top-1 bottom-1 rounded-lg flex items-center justify-center text-[6px] font-bold shadow-lg"
+                  style={{
+                    left: `${(seg.start / Math.max(trace.length, 100)) * 100}%`,
+                    width: `${((seg.end - seg.start + 1) / Math.max(trace.length, 100)) * 100}%`,
+                    backgroundColor: seg.color,
+                    zIndex: 10
+                  }}
+                >
+                  P{seg.pid}
+                </motion.div>
+              ))}
+            </AnimatePresence>
           </div>
         </div>
+      ))}
+
+      {/* X-Axis */}
+      <div className="flex ml-28 mt-4 justify-between px-4 text-[10px] text-mtx3 font-mono font-bold tracking-tighter">
+        {Array.from({ length: 11 }).map((_, i) => (
+          <span key={i}>{Math.round((Math.max(trace.length, 100) / 10) * i)} ms</span>
+        ))}
       </div>
     </div>
+  </div>
+          </div>
+        </div>
   );
 }

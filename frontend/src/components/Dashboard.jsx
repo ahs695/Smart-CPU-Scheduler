@@ -195,41 +195,73 @@ export default function Dashboard() {
           </section>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <RewardCurve data={rewardData} />
-            <LSTMPredictionChart data={lstmSamples} />
-          </div>
+  <RewardCurve data={rewardData} />
+  <LSTMPredictionChart data={lstmSamples} />
+</div>
+
+{/* How to Use + AI Insights row */}
+
+  {/* HOW TO USE GUIDE — left of Hybrid AI Insights */}
+  <div className="glass-card glass-card--inset-border p-6 flex flex-col gap-4">
+    <div className="flex items-center gap-3 border-b border-mtx1 pb-3">
+      <Info className="text-primary" size={18} />
+      <h3 className="text-sm font-bold uppercase tracking-widest text-primary/80">How to Use</h3>
+    </div>
+    <div className="flex flex-col gap-3 text-xs text-mtx4 leading-relaxed">
+      <div className="flex gap-3">
+        <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
+          <span className="text-xs font-bold text-primary">01</span>
+        </div>
+        <div>
+          <h4 className="text-sm font-bold text-mtx5">Configure Workload</h4>
+          <p className="mt-1">Pick a preset or manually define processes with Arrival, Burst, and Priority. You can also import a <span className="text-primary font-semibold">.csv</span> file via the upload button.</p>
+        </div>
+      </div>
+      <div className="flex gap-3">
+        <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
+          <span className="text-xs font-bold text-primary">02</span>
+        </div>
+        <div>
+          <h4 className="text-sm font-bold text-mtx5">Pick a Scheduler</h4>
+          <p className="mt-1">Use <span className="text-primary font-semibold">Hybrid</span> or <span className="text-primary font-semibold">PPO</span> for AI-driven scheduling (fixed 2 cores), or benchmark against FCFS, SJF, RR, or MLFQ.</p>
+        </div>
+      </div>
+      <div className="flex gap-3">
+        <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
+          <span className="text-xs font-bold text-primary">03</span>
+        </div>
+        <div>
+          <h4 className="text-sm font-bold text-mtx5">Read the Gantt Chart</h4>
+          <p className="mt-1">The top-right panel animates per-core execution live. Use <span className="text-primary font-semibold">1x–10x</span> playback speed to inspect or fast-forward scheduling decisions.</p>
+        </div>
+      </div>
+      <div className="flex gap-3">
+        <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
+          <span className="text-xs font-bold text-primary">04</span>
+        </div>
+        <div>
+          <h4 className="text-sm font-bold text-mtx5">Interpret Metrics</h4>
+          <p className="mt-1"><span className="font-semibold text-mtx5">Avg Waiting</span> — idle queue time. <span className="font-semibold text-mtx5">Turnaround</span> — total completion time. <span className="font-semibold text-mtx5">Fairness Index</span> — how evenly CPU time is shared (1.0 = perfect).</p>
+        </div>
+      </div>
+      <div className="flex gap-3">
+        <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
+          <span className="text-xs font-bold text-primary">05</span>
+        </div>
+        <div>
+          <h4 className="text-sm font-bold text-mtx5">Compare All Algorithms</h4>
+          <p className="mt-1">The comparison table and benchmark chart (bottom-left) rank all schedulers after each run — use them to justify algorithm choice for your workload type.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  
+
+
 
           {/* AI Insights Panel (Placeholder logic for demonstration) */}
-          <section className="glass-card--inset-border glass-card p-6 border-l-4 border-primary bg-primary/[0.02]">
-            <div className="flex items-center gap-3 mb-4">
-              <Brain className="text-primary" />
-              <h3 className="text-sm font-bold uppercase tracking-widest text-primary/80">Hybrid AI Insights</h3>
-            </div>
-            <div className="space-y-4">
-              <div className="flex gap-4">
-                <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
-                  <span className="text-xs font-bold text-primary">01</span>
-                </div>
-                <div>
-                  <h4 className="text-sm font-bold text-mtx5 underline decoration-primary/30 underline-offset-4">Proactive SJF Preemption</h4>
-                  <p className="text-xs text-mtx4 leading-relaxed mt-1">
-                    The Hybrid model utilized LSTM burst predictions to preempt Core 0 when a shorter task (P3) arrived, reducing potential waiting time by 14%.
-                  </p>
-                </div>
-              </div>
-              <div className="flex gap-4">
-                <div className="w-8 h-8 rounded-full bg-secondary/20 flex items-center justify-center shrink-0">
-                  <span className="text-xs font-bold text-secondary">02</span>
-                </div>
-                <div>
-                  <h4 className="text-sm font-bold text-mtx5 underline decoration-secondary/30 underline-offset-4">Load Balancing Efficiency</h4>
-                  <p className="text-xs text-mtx4 leading-relaxed mt-1">
-                    PPO-guided scheduling distributed compute-intensive tasks across 2 cores to maintain a fairness index above 0.92, outperforming naive Round Robin.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </section>
+          
         </div>
       </div>
     </div>

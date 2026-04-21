@@ -126,7 +126,7 @@ export default function InputPanel({ onSimulate, isSimulating }) {
             <label className="text-xs text-primary/70 uppercase font-bold tracking-widest">CPU Cores</label>
             {isAIScheduler && (
               <span className="text-[10px] text-primary font-bold flex items-center gap-1 bg-primary/10 px-1 py-0.5 rounded-full">
-                <AlertCircle size={10} /> Optimized for 2
+                 Optimized for 2
               </span>
             )}
           </div>

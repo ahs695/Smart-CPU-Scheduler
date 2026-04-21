@@ -32,7 +32,7 @@ export function RewardCurve({ data }) {
             fontSize={10} 
             tickLine={false} 
             axisLine={false}
-            label={{ value: 'Training Episode', position: 'insideBottom', offset: -5, fill: '040404', fontSize: 10, fontWeight: 'bold' }}
+            label={{ value: 'Training Episode', position: 'insideBottom', offset: -1, fill: '040404', fontSize: 10, fontWeight: 'bold' }}
           />
           <YAxis 
             stroke="#020202" 
@@ -64,7 +64,7 @@ export function LSTMPredictionChart({ data }) {
     <div className="glass-card glass-card--inset-border p-6 h-[300px]">
       <h3 className="text-sm font-bold uppercase tracking-widest text-secondary/80 mb-6">LSTM Burst Prediction Accuracy</h3>
       
-      <ResponsiveContainer width="100%" height="80%">
+      <ResponsiveContainer width="100%" height="90%">
         <ScatterChart>
           <CartesianGrid strokeDasharray="3 3" stroke="#000000" vertical={false} />
           <XAxis 
@@ -74,20 +74,20 @@ export function LSTMPredictionChart({ data }) {
             fontSize={10} 
             tickLine={false} 
             axisLine={false}
-            label={{ value: 'Sample ID', position: 'insideBottom', offset: -5, fill: '#040404', fontSize: 10, fontWeight: 'bold' }}
+            label={{ value: 'Sample ID', position: 'insideBottom', offset: -1, fill: '#040404', fontSize: 10, fontWeight: 'bold' }}
           />
           <YAxis 
             stroke="#020202" 
             fontSize={10} 
             tickLine={false} 
             axisLine={false}
-            label={{ value: 'Burst Length (ms)', angle: -90, position: 'insideLeft', offset: 10, fill: '#040404', fontSize: 10, fontWeight: 'bold' }}
+            label={{ value: 'Burst Length (ms)', angle: -90, position: 'insideLeft', offset: 8, fill: '#040404', fontSize: 10, fontWeight: 'bold' }}
           />
           <Tooltip 
             cursor={{ strokeDasharray: '3 3' }}
             contentStyle={{ backgroundColor: '#141417', border: '1px solid #010101', borderRadius: '8px' }}
           />
-          <Scatter name="Actual" data={data} fill="#020202" shape="circle" dataKey="actual" />
+          <Scatter name="Actual" data={data} fill="#225599" shape="circle" dataKey="actual" />
           <Scatter name="Predicted" data={data} fill="#10b981" shape="cross" dataKey="predicted" />
         </ScatterChart>
       </ResponsiveContainer>
@@ -123,7 +123,7 @@ export function ComparisonChart({ data }) {
             fontSize={10} 
             tickLine={false} 
             axisLine={false}
-            label={{ value: 'Scheduling Algorithm', position: 'insideBottom', offset: -5, fill: '#040404', fontSize: 10, fontWeight: 'bold' }}
+            label={{ value: 'Scheduling Algorithm', position: 'insideBottom', offset: -1, fill: '#040404', fontSize: 10, fontWeight: 'bold' }}
           />
           <YAxis 
             stroke="#020202" 
