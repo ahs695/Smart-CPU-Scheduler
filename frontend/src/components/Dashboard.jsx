@@ -174,7 +174,7 @@ export default function Dashboard() {
                               <td className="py-4 px-4 text-right font-mono text-mtx5">{data.waiting.toFixed(1)}</td>
                               <td className="py-4 px-4 text-right font-mono text-mtx5">{data.turnaround.toFixed(1)}</td>
                               <td className="py-4 px-4 text-center font-mono">
-                                <span className={`px-2 py-1 rounded-full text-xs font-bold ${data.fairness > 0.9 ? 'bg-emerald-500 text-white' : data.fairness > 0.8 ? 'bg-yellow-500 text-white' : 'bg-red-500 text-white'}`}>
+                                <span className={`px-2 py-1 rounded-full text-xs font-bold ${data.fairness > 0.85 ? 'bg-emerald-500 text-white' : data.fairness > 0.75 ? 'bg-yellow-500 text-white' : 'bg-red-500 text-white'}`}>
                                   {data.fairness.toFixed(2)}
                                 </span>
                               </td>
@@ -195,8 +195,6 @@ export default function Dashboard() {
           </section>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-  <RewardCurve data={rewardData} />
-  <LSTMPredictionChart data={lstmSamples} />
 </div>
 
 {/* How to Use + AI Insights row */}

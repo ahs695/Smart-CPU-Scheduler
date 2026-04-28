@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Background Circle -->
+  <circle cx="50" cy="50" r="50" fill="#0f2a52"/>
+
+  <!-- AIM (Top) -->
+  <text x="50" y="42"
+        text-anchor="middle"
+        font-family="Arial, Helvetica, sans-serif"
+        font-size="28"
+        font-weight="700"
+        fill="white">
+    AIM
+  </text>
+
+  <!-- OS (Bottom) -->
+  <text x="50" y="72"
+        text-anchor="middle"
+        font-family="Arial, Helvetica, sans-serif"
+        font-size="32"
+        font-weight="700"
+        fill="white">
+    OS
+  </text>
+</svg>

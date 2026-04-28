@@ -48,10 +48,20 @@ export default function InputPanel({ onSimulate, isSimulating }) {
   };
 
   const updateProcess = (index, field, value) => {
-    const updated = [...processes];
-    updated[index][field] = parseInt(value) || 0;
-    setProcesses(updated);
-  };
+  const updated = [...processes];
+
+  const newValue = parseInt(value);
+  if (isNaN(newValue)) return;
+
+  const currentValue = updated[index][field];
+  if (currentValue === 0 && newValue < currentValue) {
+    return; 
+  }
+
+  updated[index][field] = Math.max(0, newValue);
+
+  setProcesses(updated);
+};
 
   const removeProcess = (index) => {
     setProcesses(processes.filter((_, i) => i !== index));
@@ -219,7 +229,7 @@ export default function InputPanel({ onSimulate, isSimulating }) {
                     <input 
                       type="number" 
                       value={p.priority}
-                      onChange={(e) => updateProcess(i, 'priority', e.target.value)}
+                      onChange={(e) => updateProcess(i, 'priority', 1)}
                       className="w-16 bg-transparent border-none focus:ring-0 font-mono text-mtx5"
                     />
                   </td>
