@@ -11,7 +11,7 @@ export function RewardCurve({ data }) {
         <h3 className="text-sm font-bold uppercase tracking-widest text-primary/80">RL Agent Learning Progress</h3>
         <div className="flex gap-4">
           <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-blue-600" />
+            <div className="w-2 h-2 rounded-full bg-cyan-400" />
             <span className="text-[10px] text-mtx4 uppercase font-bold">Total Reward</span>
           </div>
         </div>
@@ -21,34 +21,36 @@ export function RewardCurve({ data }) {
         <AreaChart data={data}>
           <defs>
             <linearGradient id="colorReward" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
-              <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+              <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.4}/>
+              <stop offset="95%" stopColor="#06b6d4" stopOpacity={0}/>
             </linearGradient>
           </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="#000000" vertical={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.08)" vertical={false} />
           <XAxis 
             dataKey="episode" 
-            stroke="#020202" 
+            stroke="#94a3b8" 
             fontSize={10} 
             tickLine={false} 
             axisLine={false}
-            label={{ value: 'Training Episode', position: 'insideBottom', offset: -1, fill: '040404', fontSize: 10, fontWeight: 'bold' }}
+            tick={{ fill: '#cbd5e1' }}
+            label={{ value: 'Training Episode', position: 'insideBottom', offset: -1, fill: '#e2e8f0', fontSize: 10, fontWeight: 'bold' }}
           />
           <YAxis 
-            stroke="#020202" 
+            stroke="#94a3b8" 
             fontSize={10} 
             tickLine={false} 
             axisLine={false}
-            label={{ value: 'Total Reward', angle: -90, position: 'insideLeft', offset: 10, fill: '#040404', fontSize: 10, fontWeight: 'bold' }}
+            tick={{ fill: '#cbd5e1' }}
+            label={{ value: 'Total Reward', angle: -90, position: 'insideLeft', offset: 10, fill: '#e2e8f0', fontSize: 10, fontWeight: 'bold' }}
           />
           <Tooltip 
-            contentStyle={{ backgroundColor: '#141417', border: '1px solid #010101', borderRadius: '8px' }}
-            itemStyle={{ color: '#3b82f6', fontSize: '12px' }}
+            contentStyle={{ backgroundColor: '#12121e', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px', color: '#f1f5f9' }}
+            itemStyle={{ color: '#06b6d4', fontSize: '12px' }}
           />
           <Area 
             type="monotone" 
             dataKey="reward" 
-            stroke="#3b82f6" 
+            stroke="#06b6d4" 
             fillOpacity={1} 
             fill="url(#colorReward)" 
             strokeWidth={2}
@@ -66,28 +68,30 @@ export function LSTMPredictionChart({ data }) {
       
       <ResponsiveContainer width="100%" height="90%">
         <ScatterChart>
-          <CartesianGrid strokeDasharray="3 3" stroke="#000000" vertical={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.08)" vertical={false} />
           <XAxis 
             dataKey="id" 
             name="Sample ID" 
-            stroke="#020202" 
+            stroke="#94a3b8" 
             fontSize={10} 
             tickLine={false} 
             axisLine={false}
-            label={{ value: 'Sample ID', position: 'insideBottom', offset: -1, fill: '#040404', fontSize: 10, fontWeight: 'bold' }}
+            tick={{ fill: '#cbd5e1' }}
+            label={{ value: 'Sample ID', position: 'insideBottom', offset: -1, fill: '#e2e8f0', fontSize: 10, fontWeight: 'bold' }}
           />
           <YAxis 
-            stroke="#020202" 
+            stroke="#94a3b8" 
             fontSize={10} 
             tickLine={false} 
             axisLine={false}
-            label={{ value: 'Burst Length (ms)', angle: -90, position: 'insideLeft', offset: 8, fill: '#040404', fontSize: 10, fontWeight: 'bold' }}
+            tick={{ fill: '#cbd5e1' }}
+            label={{ value: 'Burst Length (ms)', angle: -90, position: 'insideLeft', offset: 8, fill: '#e2e8f0', fontSize: 10, fontWeight: 'bold' }}
           />
           <Tooltip 
             cursor={{ strokeDasharray: '3 3' }}
-            contentStyle={{ backgroundColor: '#141417', border: '1px solid #010101', borderRadius: '8px' }}
+            contentStyle={{ backgroundColor: '#12121e', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px', color: '#f1f5f9' }}
           />
-          <Scatter name="Actual" data={data} fill="#225599" shape="circle" dataKey="actual" />
+          <Scatter name="Actual" data={data} fill="#3b82f6" shape="circle" dataKey="actual" />
           <Scatter name="Predicted" data={data} fill="#10b981" shape="cross" dataKey="predicted" />
         </ScatterChart>
       </ResponsiveContainer>
@@ -103,7 +107,7 @@ export function ComparisonChart({ data }) {
       <div className="glass-card glass-card--inset-border p-6 h-[400px]">
         <h3 className="text-sm font-bold uppercase tracking-widest text-primary/80 mb-6">Architecture performance benchmark</h3>
         <div className="flex flex-col items-center justify-center h-[80%] opacity-50">
-          <p className="text-sm font-medium">No Data Available</p>
+          <p className="text-sm font-medium text-mtx4">No Data Available</p>
           <p className="text-xs text-mtx3 italic mt-2">Run a simulation to see performance comparisons here.</p>
         </div>
       </div>
@@ -112,30 +116,44 @@ export function ComparisonChart({ data }) {
 
   return (
     <div className="glass-card glass-card--inset-border p-6 h-[400px]">
-      <h3 className="text-sm font-bold uppercase tracking-widest text-primary/80 mb-6">Architecture performance benchmark</h3>
+      <div className="flex items-center justify-between mb-6">
+        <h3 className="text-sm font-bold uppercase tracking-widest text-primary/80">Architecture performance benchmark</h3>
+        <div className="flex items-center gap-4 text-xs font-semibold">
+          <div className="flex items-center gap-1.5 text-mtx3">
+            <span className="inline-block w-3 h-0.5 border-t-2 border-dashed border-cyan-400"></span>
+            <span>Wait Time</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-mtx3">
+            <span className="inline-block w-3 h-0.5 bg-violet-400"></span>
+            <span>Turnaround</span>
+          </div>
+        </div>
+      </div>
       
       <ResponsiveContainer width="100%" height="80%">
         <LineChart data={chartData}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#000000" vertical={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.08)" vertical={false} />
           <XAxis 
             dataKey="name" 
-            stroke="#020202" 
+            stroke="#94a3b8" 
             fontSize={10} 
             tickLine={false} 
             axisLine={false}
-            label={{ value: 'Scheduling Algorithm', position: 'insideBottom', offset: -1, fill: '#040404', fontSize: 10, fontWeight: 'bold' }}
+            tick={{ fill: '#cbd5e1' }}
+            label={{ value: 'Scheduling Algorithm', position: 'insideBottom', offset: -1, fill: '#e2e8f0', fontSize: 10, fontWeight: 'bold' }}
           />
           <YAxis 
-            stroke="#020202" 
+            stroke="#94a3b8" 
             fontSize={10} 
             tickLine={false} 
             axisLine={false}
-            label={{ value: 'Time (ms)', angle: -90, position: 'insideLeft', offset: 10, fill: '#040404', fontSize: 10, fontWeight: 'bold' }}
+            tick={{ fill: '#cbd5e1' }}
+            label={{ value: 'Time (ms)', angle: -90, position: 'insideLeft', offset: 10, fill: '#e2e8f0', fontSize: 10, fontWeight: 'bold' }}
           />
           <Tooltip 
-            contentStyle={{ backgroundColor: '#141417', border: '1px solid #010101', borderRadius: '8px' }}
+            contentStyle={{ backgroundColor: '#12121e', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px', color: '#f1f5f9' }}
           />
-          <Line type="monotone" dataKey="waiting" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, fill: '#3b82f6' }} strokeDasharray="5 5" name="Wait Time" />
+          <Line type="monotone" dataKey="waiting" stroke="#06b6d4" strokeWidth={3} dot={{ r: 4, fill: '#06b6d4' }} strokeDasharray="5 5" name="Wait Time" />
           <Line type="monotone" dataKey="turnaround" stroke="#8b5cf6" strokeWidth={3} dot={{ r: 4, fill: '#8b5cf6' }} name="Turnaround" />
         </LineChart>
       </ResponsiveContainer>

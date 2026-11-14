@@ -1,116 +1,201 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: #ffffff;
- --color-bg: #ffffff;          
---color-card: #f5f7f6;       
---color-primary: #16a34a;    
---mtx1: #6B7280; 
---mtx2: #4B5563; 
---mtx3: #374151;
---mtx4: #1F2937; 
---mtx5: #111827; 
---color-secondary: #22c55e;  
---color-accent: #4ade80;    
---color-text: #111111;       
---color-text-muted: #4b5563;
---color-border: #e5e7eb;     
+  --color-background: #0a0a0f;
+  --color-bg: #0a0a0f;
+  --color-card: rgba(15, 15, 25, 0.8);
+  --color-card-solid: #0f0f19;
+  --color-primary: #06b6d4;
+  --color-secondary: #8b5cf6;
+  --color-accent: #10b981;
+  --color-rose: #f43f5e;
+  --color-text: #e2e8f0;
+  --color-text-muted: #64748b;
+  --color-border: rgba(255, 255, 255, 0.06);
+
+  --mtx1: rgba(255, 255, 255, 0.06);
+  --mtx2: #94a3b8;
+  --mtx3: #cbd5e1;
+  --mtx4: #e2e8f0;
+  --mtx5: #f1f5f9;
+
   --font-sans: "Inter", "system-ui", "sans-serif";
-  --accent: #174d0a;           /* main green */
---accent-bg: #dcfce7;        /* light green background */
---accent-border: #15803d;    /* darker green for hover */
 
---text-h: #111111;           /* primary text (near black) */
---border: #e5e7eb;           /* subtle light border */
---social-bg: #f0fdf4;        /* very light green tint */
+  --accent: #06b6d4;
+  --accent-bg: rgba(6, 182, 212, 0.1);
+  --accent-border: #0891b2;
 
---shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --text-h: #f1f5f9;
+  --border: rgba(255, 255, 255, 0.06);
+  --social-bg: rgba(6, 182, 212, 0.05);
+
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
 }
 
 @layer base {
   body {
-    @apply bg-amber-50 text-gray-600 antialiased selection:bg-primary/30;
+    @apply bg-background text-text antialiased selection:bg-primary/30;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(6, 182, 212, 0.3);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(6, 182, 212, 0.5);
   }
 }
 
 @layer components {
+  /* ── Glass Card ─────────────────────────────────── */
   .glass-card {
-  @apply relative bg-card/50 border border-white/5 backdrop-blur-xl rounded-2xl shadow-2xl overflow-hidden;
-}
-
-/* ✨ gradient sweep (always active) */
-.glass-card::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-  120deg,
-  transparent 0%,
-  rgba(248, 232, 232, 0.15) 25%,
-  rgba(248, 232, 232, 0.35) 40%,
-  rgba(183, 182, 182, 0.45) 50%,
-  rgba(248, 232, 232, 0.35) 60%,
-  rgba(248, 232, 232, 0.15) 75%,
-  transparent 100%
-  );
-  opacity: 0;
-  transform: translateX(-100%);
-  animation: glass-sweep 8s linear infinite;
-  pointer-events: none;
-}
-
-/* 🔲 optional inset dashed border */
-.glass-card--inset-border::after {
-  content: "";
-  position: absolute;
-  inset: 1px;
-  border-radius: inherit;
-  border: 1px dashed rgba(255, 255, 255, 0.15);
-  pointer-events: none;
-}
-
-/* 🎬 animation */
-@keyframes glass-sweep {
-  0% {
-    transform: translateX(-100%);
-    opacity: 0;
+    @apply relative backdrop-blur-xl rounded-2xl shadow-2xl overflow-hidden;
+    background: rgba(15, 15, 25, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.06);
   }
-  20% {
-    opacity: 0.4;
+
+  .glass-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      120deg,
+      transparent 0%,
+      rgba(6, 182, 212, 0.06) 25%,
+      rgba(139, 92, 246, 0.08) 40%,
+      rgba(16, 185, 129, 0.06) 55%,
+      rgba(139, 92, 246, 0.04) 70%,
+      transparent 100%
+    );
+    opacity: 0;
+    transform: translateX(-100%);
+    animation: glass-sweep 10s linear infinite;
+    pointer-events: none;
+  }
+
+  .glass-card--inset-border::after {
+    content: "";
+    position: absolute;
+    inset: 1px;
+    border-radius: inherit;
+    border: 1px dashed rgba(255, 255, 255, 0.08);
+    pointer-events: none;
+  }
+
+  @keyframes glass-sweep {
+    0% {
+      transform: translateX(-100%);
+      opacity: 0;
+    }
+    20% {
+      opacity: 0.6;
+    }
+    50% {
+      transform: translateX(100%);
+      opacity: 0.3;
+    }
+    80% {
+      opacity: 0;
+    }
+    100% {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+  }
+
+  /* ── Glass Input ────────────────────────────────── */
+  .glass-input {
+    @apply w-full px-4 py-2 rounded-lg outline-none transition-all font-medium appearance-none;
+    background-color: #12121e;
+    color: #e2e8f0;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .glass-input:focus {
+    border-color: rgba(6, 182, 212, 0.5);
+    box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.2), 0 0 20px rgba(6, 182, 212, 0.1);
+  }
+
+  .glass-input option {
+    background-color: #12121e;
+    color: #e2e8f0;
+  }
+
+  /* ── Primary Button ─────────────────────────────── */
+  .btn-primary {
+    @apply font-semibold px-6 py-2 rounded-xl transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none;
+    background: linear-gradient(135deg, #06b6d4, #8b5cf6);
+    color: white;
+    border: none;
+    box-shadow: 0 4px 15px rgba(6, 182, 212, 0.3), 0 0 30px rgba(139, 92, 246, 0.15);
+  }
+
+  .btn-primary:hover {
+    filter: brightness(1.15);
+    box-shadow: 0 4px 20px rgba(6, 182, 212, 0.4), 0 0 40px rgba(139, 92, 246, 0.25);
+  }
+
+  /* ── Neon Glow Utility ──────────────────────────── */
+  .neon-glow {
+    animation: glow-pulse 3s ease-in-out infinite;
+  }
+
+  .neon-glow-cyan {
+    box-shadow: 0 0 15px rgba(6, 182, 212, 0.3), 0 0 30px rgba(6, 182, 212, 0.1);
+  }
+
+  .neon-glow-violet {
+    box-shadow: 0 0 15px rgba(139, 92, 246, 0.3), 0 0 30px rgba(139, 92, 246, 0.1);
+  }
+
+  .neon-glow-emerald {
+    box-shadow: 0 0 15px rgba(16, 185, 129, 0.3), 0 0 30px rgba(16, 185, 129, 0.1);
+  }
+}
+
+/* ── Keyframes ──────────────────────────────────── */
+@keyframes glow-pulse {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(6, 182, 212, 0.2), 0 0 20px rgba(6, 182, 212, 0.1);
   }
   50% {
-    transform: translateX(100%);
-    opacity: 0.25;
+    box-shadow: 0 0 20px rgba(6, 182, 212, 0.4), 0 0 40px rgba(6, 182, 212, 0.2), 0 0 60px rgba(139, 92, 246, 0.1);
   }
-  80% {
-    opacity: 0;
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% center;
   }
   100% {
-    transform: translateX(100%);
-    opacity: 0;
-  }
-}
-  .glass-input {
-  @apply w-full px-4 py-2 rounded-lg outline-none transition-all font-medium appearance-none;
-  background-color: #F8F7EF;
-  border: 1px solid rgba(0, 0, 0, 0.15); /* softer than black */
-}
-
-.glass-input:focus {
-  border-color: rgba(34, 197, 94, 0.5); /* green focus */
-  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.3);
-}
-
-  .btn-primary {
-    @apply bg-primary hover:bg-primary/80 text-gray-600 font-medium px-6 py-2 rounded-xl transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none;
+    background-position: 200% center;
   }
 }
 
-/* Custom Gantt Styles */
+/* ── Gantt Styles ───────────────────────────────── */
 .gantt-row {
-  @apply relative h-12 border-b border-green-400 w-full;
+  @apply relative h-12 w-full;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .gantt-block {
-  @apply absolute h-8 top-2 rounded-md flex items-center justify-center text-[10px] font-bold text-black shadow-lg cursor-pointer transition-transform hover:scale-105;
+  @apply absolute h-8 top-2 rounded-md flex items-center justify-center text-[10px] font-bold text-white shadow-lg cursor-pointer transition-transform hover:scale-105;
 }

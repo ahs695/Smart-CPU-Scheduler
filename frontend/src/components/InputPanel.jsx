@@ -117,20 +117,20 @@ export default function InputPanel({ onSimulate, isSimulating }) {
       {/* Configuration Header */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="flex flex-col gap-2">
-          <label className="text-xs text-white text-center bg-accent rounded-3xl uppercase font-bold tracking-widest ">Scheduler Architecture</label>
+          <label className="text-xs text-primary/80 uppercase font-bold tracking-widest pl-1">Scheduler Architecture</label>
           <select 
-  value={scheduler}
-  onChange={(e) => setScheduler(e.target.value)}
-  className="glass-input text-black"
->
-  <option value="HYBRID">Hybrid (PPO + LSTM)</option>
-  <option value="PPO">PPO Agent</option>
-  <option value="FCFS">First-Come-First-Serve</option>
-  <option value="SJF">Shortest Job First</option>
-  <option value="RR">Round Robin</option>
-  <option value="MLFQ">Multi-Level Feedback Queue</option>
-</select>
-</div>
+            value={scheduler}
+            onChange={(e) => setScheduler(e.target.value)}
+            className="glass-input text-mtx4 bg-[#12121e] border-white/10"
+          >
+            <option value="HYBRID" className="bg-[#12121e] text-slate-200">Hybrid (PPO + LSTM)</option>
+            <option value="PPO" className="bg-[#12121e] text-slate-200">PPO Agent</option>
+            <option value="FCFS" className="bg-[#12121e] text-slate-200">First-Come-First-Serve</option>
+            <option value="SJF" className="bg-[#12121e] text-slate-200">Shortest Job First</option>
+            <option value="RR" className="bg-[#12121e] text-slate-200">Round Robin</option>
+            <option value="MLFQ" className="bg-[#12121e] text-slate-200">Multi-Level Feedback Queue</option>
+          </select>
+        </div>
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between pl-1">
             <label className="text-xs text-primary/70 uppercase font-bold tracking-widest">CPU Cores</label>
@@ -165,7 +165,7 @@ export default function InputPanel({ onSimulate, isSimulating }) {
           <button
             key={i}
             onClick={() => applyPreset(p.data)}
-            className="flex-1 flex items-center justify-center gap-2 py-3 glass-card--inset-border glass-card hover:bg-gray-200 transition-all group"
+            className="flex-1 flex items-center justify-center gap-2 py-3 glass-card--inset-border glass-card hover:bg-white/[0.06] transition-all group"
           >
             <span className="text-xs font-bold uppercase tracking-wider text-mtx4">{p.name}</span>
           </button>
@@ -207,7 +207,7 @@ export default function InputPanel({ onSimulate, isSimulating }) {
             </thead>
             <tbody>
               {processes.map((p, i) => (
-                <tr key={i} className="border-b border-mtx1 group hover:bg-gray-200 transition-colors">
+                <tr key={i} className="border-b border-mtx1 group hover:bg-white/[0.04] transition-colors">
                   <td className="px-3 py-3 font-mono text-primary font-bold">P{p.pid}</td>
                   <td className="px-3 py-3">
                     <input 
