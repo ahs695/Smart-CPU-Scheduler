@@ -2,13 +2,15 @@
 """
 Phase 6 — Classical Scheduler Baseline Experiments
 
-Runs FCFS, RR, and MLFQ across all workload types for n_runs seeds.
+Runs FCFS, SJF, SRTF, RR and MLFQ across all workload types, n_runs seeds
+and one or more core counts. SJF and SRTF know true burst lengths, so they
+are oracle reference points for the learned (non-clairvoyant) schedulers.
 Each (run_id, workload_type) pair uses the same seed everywhere so
 results are directly comparable to run_rl.py output.
 
 Usage:
     python -m backend.experiments.run_baselines
-    python -m backend.experiments.run_baselines --runs 20 --processes 30
+    python -m backend.experiments.run_baselines --runs 20 --processes 30 --cores 1 2 4 8
 """
 
 import os
@@ -23,16 +25,18 @@ from backend.simulator.metrics import MetricsEngine
 
 # Classical schedulers
 from backend.simulator.traditional.fcfs import FCFSScheduler
+from backend.simulator.traditional.sjf import SJFScheduler
 from backend.simulator.traditional.round_robin import RoundRobinScheduler
 from backend.simulator.traditional.mlfq import MLFQScheduler
 
 # Output path
-RESULTS_DIR = "results"
+from backend.paths import RESULTS_DIR
 OUTPUT_FILE = os.path.join(RESULTS_DIR, "baselines.csv")
 
 CSV_COLUMNS = [
     "algorithm",
     "workload_type",
+    "num_cores",
     "run_id",
     "avg_waiting_time",
     "avg_turnaround_time",
@@ -55,6 +59,8 @@ def _make_schedulers() -> Dict[str, object]:
     """
     return {
         "FCFS": FCFSScheduler(),
+        "SJF":  SJFScheduler(preemptive=False),
+        "SRTF": SJFScheduler(preemptive=True),
         "RR":   RoundRobinScheduler(quantum=2),
         "MLFQ": MLFQScheduler(),
     }
@@ -109,7 +115,7 @@ def run_single_experiment(
 def run_all_baselines(
     n_runs: int = 10,
     n_processes: int = 30,
-    num_cores: int = 2
+    cores_list: List[int] = (2,),
 ) -> List[Dict]:
     """
     Main experiment loop.
@@ -126,50 +132,52 @@ def run_all_baselines(
     """
     rows = []
 
-    total_experiments = n_runs * len(WORKLOAD_TYPES)
+    total_experiments = n_runs * len(WORKLOAD_TYPES) * len(cores_list)
     done = 0
 
-    for run_id in range(n_runs):
-        for workload_type in WORKLOAD_TYPES:
+    for num_cores in cores_list:
+        for run_id in range(n_runs):
+            for workload_type in WORKLOAD_TYPES:
 
-            # --- Generate ONE seeded workload for this (run_id, workload_type)
-            processes = generate_workload(
-                workload_type=workload_type,
-                n_processes=n_processes,
-                seed=run_id
-            )
+                # --- Generate ONE seeded workload for this (run_id, workload_type)
+                processes = generate_workload(
+                    workload_type=workload_type,
+                    n_processes=n_processes,
+                    seed=run_id
+                )
 
-            # --- Run each scheduler on a copy of *the same* workload
-            schedulers = _make_schedulers()
+                # --- Run each scheduler on a copy of *the same* workload
+                schedulers = _make_schedulers()
 
-            for algo_name, scheduler in schedulers.items():
-                try:
-                    metrics = run_single_experiment(
-                        scheduler=scheduler,
-                        processes=processes,
-                        num_cores=num_cores,
-                    )
+                for algo_name, scheduler in schedulers.items():
+                    try:
+                        metrics = run_single_experiment(
+                            scheduler=scheduler,
+                            processes=processes,
+                            num_cores=num_cores,
+                        )
 
-                    row = {
-                        "algorithm":    algo_name,
-                        "workload_type": workload_type,
-                        "run_id":       run_id,
-                        **metrics,
-                    }
-                    rows.append(row)
+                        row = {
+                            "algorithm":    algo_name,
+                            "workload_type": workload_type,
+                            "num_cores":    num_cores,
+                            "run_id":       run_id,
+                            **metrics,
+                        }
+                        rows.append(row)
 
-                except Exception as e:
-                    print(
-                        f"  ⚠ [{algo_name}] run_id={run_id} "
-                        f"workload={workload_type} FAILED: {e}"
-                    )
+                    except Exception as e:
+                        print(
+                            f"  ⚠ [{algo_name}] run_id={run_id} "
+                            f"workload={workload_type} FAILED: {e}"
+                        )
 
-            done += 1
-            pct = (done / total_experiments) * 100
-            print(
-                f"  [OK] run_id={run_id:>2}  workload={workload_type:<10}  "
-                f"({pct:.0f}% complete)"
-            )
+                done += 1
+                pct = (done / total_experiments) * 100
+                print(
+                    f"  [OK] cores={num_cores}  run_id={run_id:>2}  workload={workload_type:<10}  "
+                    f"({pct:.0f}% complete)"
+                )
 
     return rows
 
@@ -212,8 +220,8 @@ def main():
         help="Number of processes per workload (default: 30)"
     )
     parser.add_argument(
-        "--cores", type=int, default=2,
-        help="Number of CPU cores to simulate (default: 2)"
+        "--cores", type=int, nargs="+", default=[1, 2, 4, 8],
+        help="Core counts to simulate (default: 1 2 4 8)"
     )
     parser.add_argument(
         "--output", type=str, default=OUTPUT_FILE,
@@ -224,7 +232,7 @@ def main():
     print("=" * 60)
     print("  Phase 6 — Classical Scheduler Baselines")
     print("=" * 60)
-    print(f"  Schedulers : FCFS, RR (q=2), MLFQ")
+    print(f"  Schedulers : {', '.join(_make_schedulers())}")
     print(f"  Workloads  : {', '.join(WORKLOAD_TYPES)}")
     print(f"  Runs       : {args.runs}  (seed = run_id)")
     print(f"  Processes  : {args.processes}")
@@ -236,12 +244,12 @@ def main():
     rows = run_all_baselines(
         n_runs=args.runs,
         n_processes=args.processes,
-        num_cores=args.cores,
+        cores_list=args.cores,
     )
 
     save_results(rows, filepath=args.output)
 
-    expected = args.runs * len(WORKLOAD_TYPES) * 3   # 3 classical schedulers
+    expected = args.runs * len(WORKLOAD_TYPES) * len(args.cores) * len(_make_schedulers())
     print(f"\n  Expected rows : {expected}")
     print(f"  Actual rows   : {len(rows)}")
     if len(rows) < expected:

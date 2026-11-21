@@ -22,24 +22,19 @@ import torch
 from stable_baselines3 import PPO
 
 from backend.experiments.workload_factory import generate_workload, WORKLOAD_TYPES
-from backend.ml.lstm_model import BurstPredictorLSTM
+from backend.ml.lstm_model import BurstPredictorLSTM, load_lstm as _load_lstm_checkpoint
 from backend.rl.env import SchedulingEnv
 from backend.hybrid.hybrid_scheduler import HybridSchedulingEnv
 from backend.simulator.metrics import MetricsEngine
-
-# Model paths
-PPO_MODEL_PATH    = "models/ppo_scheduler.zip"
-HYBRID_MODEL_PATH = "models/ppo_scheduler_hybrid.zip"
-HYBRID_LEGACY_PATH = "models/ppo_scheduler.zip"
-LSTM_MODEL_PATH   = "models/lstm_model.pt"
+from backend.paths import LSTM_MODEL_PATH, RESULTS_DIR, ppo_model_candidates
 
 # Output
-RESULTS_DIR = "results"
 OUTPUT_FILE = os.path.join(RESULTS_DIR, "rl_results.csv")
 
 CSV_COLUMNS = [
     "algorithm",
     "workload_type",
+    "num_cores",
     "run_id",
     "avg_waiting_time",
     "avg_turnaround_time",
@@ -52,33 +47,30 @@ CSV_COLUMNS = [
 
 # RL env config — must match training settings
 MAX_QUEUE_SIZE = 50
-MAX_STEPS      = 100_000
+MAX_STEPS      = 15_000  # same as train_ppo.py; it scales the time_norm observation
 
 
 # ------------------------------------------------------------
 # Model loading
 # ------------------------------------------------------------
 
-def load_ppo_model(path: str) -> Optional[object]:
-    if os.path.exists(path):
-        print(f"  ✓ Loaded PPO model from {path}")
-        return PPO.load(path)
-    print(f"  ⚠ PPO model not found: {path}")
+def load_ppo_model(mode: str, num_cores: int) -> Optional[object]:
+    """Load the policy trained for this mode and core count."""
+    candidates = ppo_model_candidates(mode, num_cores)
+    for path in candidates:
+        if os.path.exists(path):
+            print(f"  ✓ Loaded {mode.upper()} model from {path}")
+            return PPO.load(path)
+    print(f"  ⚠ {mode.upper()} model not found for {num_cores} cores: tried {', '.join(candidates)}")
     return None
 
 
-def load_lstm(path: str) -> BurstPredictorLSTM:
-    lstm = BurstPredictorLSTM()
-    if os.path.exists(path):
-        checkpoint = torch.load(path, map_location="cpu")
-        if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
-            lstm.load_state_dict(checkpoint["model_state_dict"])
-        else:
-            lstm.load_state_dict(checkpoint)
+def load_lstm(path: str) -> Optional[BurstPredictorLSTM]:
+    lstm = _load_lstm_checkpoint(path)
+    if lstm is not None:
         print(f"  ✓ Loaded LSTM model from {path}")
     else:
-        print(f"  ⚠ LSTM model not found: {path}  (using untrained weights)")
-    lstm.eval()
+        print(f"  ⚠ LSTM model not found: {path}  (Hybrid falls back to window-mean predictions)")
     return lstm
 
 
@@ -170,10 +162,19 @@ def run_rl_experiment(
 def run_all_rl(
     n_runs: int = 10,
     n_processes: int = 30,
-    num_cores: int = 2,
+    cores_list: List[int] = (2,),
     run_ppo: bool = True,
     run_hybrid: bool = True,
 ) -> List[Dict]:
+    lstm = load_lstm(LSTM_MODEL_PATH)
+    rows = []
+    for num_cores in cores_list:
+        print(f"\n--- {num_cores} core(s) ---")
+        rows += _run_rl_for_cores(n_runs, n_processes, num_cores, run_ppo, run_hybrid, lstm)
+    return rows
+
+
+def _run_rl_for_cores(n_runs, n_processes, num_cores, run_ppo, run_hybrid, lstm) -> List[Dict]:
     """
     Evaluate enabled RL schedulers on all seeded workloads.
 
@@ -181,14 +182,9 @@ def run_all_rl(
     so results can be directly merged and compared.
     """
     # --- Load models once
-    ppo_model    = load_ppo_model(PPO_MODEL_PATH) if run_ppo else None
-    hybrid_model = None
-    if run_hybrid:
-        hybrid_model = load_ppo_model(HYBRID_MODEL_PATH)
-        if hybrid_model is None:
-            hybrid_model = load_ppo_model(HYBRID_LEGACY_PATH)
+    ppo_model    = load_ppo_model("ppo", num_cores) if run_ppo else None
+    hybrid_model = load_ppo_model("hybrid", num_cores) if run_hybrid else None
 
-    lstm = load_lstm(LSTM_MODEL_PATH)
     print()
 
     # --- Decide which algorithms to actually run
@@ -235,6 +231,7 @@ def run_all_rl(
                         row = {
                             "algorithm":     algo_name,
                             "workload_type": workload_type,
+                            "num_cores":     num_cores,
                             "run_id":        run_id,
                             **metrics,
                         }
@@ -288,8 +285,8 @@ def main():
         help="Number of processes per workload (default: 30)"
     )
     parser.add_argument(
-        "--cores", type=int, default=2,
-        help="Number of CPU cores (default: 2)"
+        "--cores", type=int, nargs="+", default=[1, 2, 4, 8],
+        help="Core counts to evaluate (default: 1 2 4 8)"
     )
     parser.add_argument(
         "--mode", choices=["ppo", "hybrid", "both"], default="both",
@@ -322,7 +319,7 @@ def main():
     rows = run_all_rl(
         n_runs=args.runs,
         n_processes=args.processes,
-        num_cores=args.cores,
+        cores_list=args.cores,
         run_ppo=run_ppo,
         run_hybrid=run_hybrid,
     )
@@ -331,7 +328,7 @@ def main():
         save_results(rows, filepath=args.output)
 
     n_agents = (1 if run_ppo else 0) + (1 if run_hybrid else 0)
-    expected = args.runs * len(WORKLOAD_TYPES) * n_agents
+    expected = args.runs * len(WORKLOAD_TYPES) * len(args.cores) * n_agents
     print(f"\n  Expected rows : {expected}")
     print(f"  Actual rows   : {len(rows)}")
     if len(rows) < expected:

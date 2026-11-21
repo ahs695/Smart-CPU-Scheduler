@@ -18,3 +18,9 @@ models/
 
 # Logs
 *.log
+# Node (dependencies live in frontend/)
+/node_modules/
+
+# Code snapshot archives (models.zip stays tracked: it is how trained models are shared)
+backend/*.zip
+frontend/src.zip

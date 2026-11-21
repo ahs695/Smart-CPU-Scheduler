@@ -3,7 +3,6 @@
 import os
 import copy
 import torch
-import numpy as np
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
@@ -22,62 +21,92 @@ from backend.simulator.traditional.mlfq import MLFQScheduler
 from stable_baselines3 import PPO
 from backend.rl.env import SchedulingEnv
 from backend.hybrid.hybrid_scheduler import HybridSchedulingEnv
-from backend.ml.lstm_model import BurstPredictorLSTM
+from backend.ml.lstm_model import MAX_BURST, load_lstm
+from backend.hybrid.hybrid_scheduler import FALLBACK_BURST
+from backend.ml.dataset import DatasetBuilder
+from backend.paths import LSTM_MODEL_PATH, ppo_model_candidates
 
 app = Flask(__name__)
 CORS(app)
 
 # --- Global Model Cache ---
-MODELS = {
-    "ppo": None,
-    "hybrid": None,
-    "lstm": None
-}
+# Models keyed by (mode, num_cores), e.g. ("ppo", 2), ("hybrid", 4)
+MODELS = {}
+LSTM_MODEL = None
+
+SUPPORTED_CORES = [1, 2, 4, 8]
+
+def _load_lstm():
+    """Load the shared LSTM burst predictor into LSTM_MODEL (no-op if loaded or missing)."""
+    global LSTM_MODEL
+    if LSTM_MODEL is not None:
+        return
+    try:
+        LSTM_MODEL = load_lstm(LSTM_MODEL_PATH)
+    except Exception as e:
+        print(f"Error loading LSTM: {e}")
+
+def _load_policy(mode, num_cores):
+    """Load and cache the PPO/Hybrid policy for a core count. Returns None if unavailable."""
+    key = (mode, num_cores)
+    if key not in MODELS:
+        for path in ppo_model_candidates(mode, num_cores):
+            if os.path.exists(path):
+                try:
+                    MODELS[key] = PPO.load(path)
+                    break
+                except Exception as e:
+                    print(f"Error loading {path}: {e}")
+    return MODELS.get(key)
 
 def load_models():
-    ppo_path = "models/ppo_scheduler.zip"
-    hybrid_path = "models/ppo_scheduler_hybrid.zip"
-    lstm_path = "models/lstm_model.pt"
-
-    if os.path.exists(ppo_path):
-        MODELS["ppo"] = PPO.load(ppo_path)
-    
-    if os.path.exists(hybrid_path):
-        MODELS["hybrid"] = PPO.load(hybrid_path)
-        
-    if os.path.exists(lstm_path):
-        lstm = BurstPredictorLSTM()
-        checkpoint = torch.load(lstm_path, map_location="cpu")
-        if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
-            lstm.load_state_dict(checkpoint["model_state_dict"])
-        else:
-            lstm.load_state_dict(checkpoint)
-        lstm.eval()
-        MODELS["lstm"] = lstm
+    _load_lstm()
+    for nc in SUPPORTED_CORES:
+        _load_policy("ppo", nc)
+        _load_policy("hybrid", nc)
 
 # Initial load
 load_models()
 
 # --- Helper Logic ---
 
+TRADITIONAL_SCHEDULERS = ["FCFS", "SJF", "RR", "MLFQ"]
+
 def get_scheduler(name, quantum=2):
+    """Single source of truth for traditional schedulers, shared by
+    /simulate and /compare so both endpoints run identical algorithms."""
     name = name.upper()
     if name == "FCFS": return FCFSScheduler()
-    if name == "SJF": return SJFScheduler()
+    if name == "SJF": return SJFScheduler(preemptive=False)
     if name == "RR": return RoundRobinScheduler(quantum=quantum)
     if name == "MLFQ": return MLFQScheduler()
     return None
 
+def _parse_quantum(data):
+    """Returns (quantum, error_message)."""
+    try:
+        quantum = int(data.get("quantum", 2))
+    except (TypeError, ValueError):
+        return None, "quantum must be an integer"
+    if quantum < 1:
+        return None, "quantum must be >= 1"
+    return quantum, None
+
 def run_rl_sim(mode, processes, num_cores):
-    model = MODELS[mode.lower()]
+    num_cores = int(num_cores)
+
+    model = _load_policy(mode.lower(), num_cores)
     if model is None:
         return None
-    
+
+    if mode.lower() == "hybrid":
+        _load_lstm()
+
     if mode.lower() == "hybrid":
         env = HybridSchedulingEnv(
             processes=copy.deepcopy(processes),
             num_cores=num_cores,
-            lstm_model=MODELS["lstm"]
+            lstm_model=LSTM_MODEL
         )
     else:
         env = SchedulingEnv(
@@ -156,60 +185,71 @@ def run_traditional_sim(scheduler, processes, num_cores):
 def home():
     return jsonify({
         "status": "online",
-        "models_loaded": {k: v is not None for k, v in MODELS.items()}
+        "lstm_loaded": LSTM_MODEL is not None,
+        "models_loaded": {f"{mode}_{nc}c": True for (mode, nc) in MODELS}
     })
 
 @app.route("/simulate", methods=["POST"])
 def simulate():
-    data = request.json
+    data = request.json or {}
     sched_name = data.get("scheduler", "FCFS")
-    num_cores = data.get("num_cores", 2)
+    num_cores = int(data.get("num_cores", 2))
     process_data = data.get("processes", [])
-    
-    # Convert process dicts to Process objects
-    processes = []
-    for p in process_data:
-        processes.append(Process(
-            pid=p.get("pid", 0),
-            arrival_time=p.get("arrival", 0),
-            burst_time=p.get("burst", 5),
-            priority=p.get("priority", 0)
-        ))
-    
+    quantum, quantum_error = _parse_quantum(data)
+    if quantum_error:
+        return jsonify({"error": quantum_error}), 400
+
+    processes, process_error = _parse_processes(process_data)
+    if process_error:
+        return jsonify({"error": process_error}), 400
+
     if not processes:
         # Fallback to a small random workload if none provided
         processes = WorkloadGenerator.mixed(10)
         
     if sched_name in ["PPO", "HYBRID"]:
-        # RL / Hybrid agents are currently hardcoded for 2 cores based on training
-        if num_cores != 2:
-            num_cores = 2
-            warning = "AI models are currently optimized strictly for 2-core architectures. Simulation was adjusted to ensure stability."
         result = run_rl_sim(sched_name, processes, num_cores)
+        if result is None:
+            return jsonify({"error": f"No trained {sched_name} model for {num_cores}-core configuration. Train a model first."}), 400
     else:
-        scheduler = get_scheduler(sched_name)
+        scheduler = get_scheduler(sched_name, quantum=quantum)
         if not scheduler:
             return jsonify({"error": "Unknown scheduler"}), 400
         result = run_traditional_sim(scheduler, processes, num_cores)
         
     if not result:
         return jsonify({"error": "Simulation failed (check if models are loaded)"}), 500
-        
-    if "warning" in locals():
-        result["note"] = warning
 
     return jsonify(result)
 
 def _parse_processes(process_data):
+    """
+    Convert request process dicts to Process objects. Returns (processes, error_message).
+    Rejects bursts < 1 and negative arrivals: such processes never complete, so the
+    simulation would spin until its safety cap.
+    """
     processes = []
-    for p in process_data or []:
-        processes.append(Process(
-            pid=p.get("pid", 0),
-            arrival_time=p.get("arrival", 0),
-            burst_time=p.get("burst", 5),
-            priority=p.get("priority", 0),
-        ))
-    return processes
+    for i, p in enumerate(process_data or []):
+        try:
+            pid = int(p.get("pid", i))
+            arrival = int(p.get("arrival", p.get("arrival_time", 0)))
+            burst = int(p.get("burst", p.get("burst_time", 5)))
+            priority = int(p.get("priority", 0))
+        except (TypeError, ValueError, AttributeError):
+            return None, f"process {i}: pid, arrival, burst and priority must be integers"
+        # Optional program / executable label (any string or number); blank = unknown
+        # (normalised to a string so 3 and "3" are the same program)
+        program = p.get("program")
+        if program is not None and not isinstance(program, (str, int)):
+            return None, f"process P{pid}: program must be a string or integer"
+        program = str(program).strip() if program is not None else ""
+        program = program or None
+        if burst < 1:
+            return None, f"process P{pid}: burst must be >= 1"
+        if arrival < 0:
+            return None, f"process P{pid}: arrival must be >= 0"
+        processes.append(Process(pid=pid, arrival_time=arrival, burst_time=burst, priority=priority, program=program))
+    return processes, None
 
 def _safe_metrics(runner):
     """Runs a scheduler, returns metrics or an error record. Never raises."""
@@ -234,23 +274,23 @@ def compare():
     """
     data = request.get_json(silent=True) or {}
     num_cores = int(data.get("num_cores", 2))
-    quantum = int(data.get("quantum", 2))
+    quantum, quantum_error = _parse_quantum(data)
+    if quantum_error:
+        return jsonify({"error": quantum_error}), 400
 
-    processes = _parse_processes(data.get("processes"))
+    processes, process_error = _parse_processes(data.get("processes"))
+    if process_error:
+        return jsonify({"error": process_error}), 400
     if not processes:
         processes = WorkloadGenerator.mixed(10)
 
-    # RL/Hybrid models were trained at 2 cores; force that to get honest numbers
-    rl_cores = 2 if num_cores != 2 else num_cores
-
+    # Traditional schedulers come from get_scheduler() — same config as /simulate.
     schedulers = {
-        "FCFS":   lambda: run_traditional_sim(FCFSScheduler(), processes, num_cores),
-        "SJF":    lambda: run_traditional_sim(SJFScheduler(preemptive=True), processes, num_cores),
-        "RR":     lambda: run_traditional_sim(RoundRobinScheduler(quantum=quantum), processes, num_cores),
-        "MLFQ":   lambda: run_traditional_sim(MLFQScheduler(), processes, num_cores),
-        "PPO":    lambda: run_rl_sim("ppo", processes, rl_cores),
-        "Hybrid": lambda: run_rl_sim("hybrid", processes, rl_cores),
+        name: (lambda n=name: run_traditional_sim(get_scheduler(n, quantum=quantum), processes, num_cores))
+        for name in TRADITIONAL_SCHEDULERS
     }
+    schedulers["PPO"] = lambda: run_rl_sim("ppo", processes, num_cores)
+    schedulers["Hybrid"] = lambda: run_rl_sim("hybrid", processes, num_cores)
 
     comparison = {name: _safe_metrics(runner) for name, runner in schedulers.items()}
 
@@ -263,26 +303,44 @@ def compare():
         },
     })
 
-@app.route("/reward-curve", methods=["GET"])
-def reward_curve():
-    # Return a high-fidelity synthetic training curve
-    episodes = np.arange(0, 1000, 10)
-    # Logarithmic-like growth with some noise
-    rewards = 200 * (1 - np.exp(-episodes/300)) - 50 + np.random.normal(0, 5, len(episodes))
-    
-    data = [{"episode": int(e), "reward": float(r)} for e, r in zip(episodes, rewards)]
-    return jsonify(data)
+LSTM_EVAL_SAMPLES = 50      # points plotted
+LSTM_EVAL_WORKLOADS = 200   # held-out workloads the MAE is computed on
+LSTM_EVAL_SEED = 42
+_lstm_eval_cache = None
 
 @app.route("/lstm-predictions", methods=["GET"])
 def lstm_predictions():
-    # Return sample predicted vs actual data
-    samples = 50
-    actual = np.random.gamma(2, 5, samples)
-    # Add some bias and noise to prediction
-    predicted = actual * 0.9 + np.random.normal(0, 2, samples)
-    
-    data = [{"id": i, "actual": float(a), "predicted": float(p)} for i, (a, p) in enumerate(zip(actual, predicted))]
-    return jsonify(data)
+    """
+    Real LSTM predictions vs ground truth on seeded, held-out workloads built
+    exactly like its training data (same-program job histories; see
+    backend/ml/dataset.py). Values are in burst-time ticks. The baseline
+    predicts the program's previous finished burst.
+    """
+    global _lstm_eval_cache
+    _load_lstm()
+    if LSTM_MODEL is None:
+        return jsonify({"error": "LSTM model not available"}), 503
+
+    if _lstm_eval_cache is None:
+        groups = DatasetBuilder.generate(LSTM_EVAL_WORKLOADS, seed=LSTM_EVAL_SEED)
+        X = [x for g in groups.values() for x in g[0]]
+        y = [t * MAX_BURST for g in groups.values() for t in g[1]]
+        hist = [h for g in groups.values() for h in g[2]]
+        with torch.no_grad():
+            preds = (LSTM_MODEL(torch.tensor(X, dtype=torch.float32)).clamp(0, 1) * MAX_BURST).tolist()
+        baseline = [h[-1] if h else FALLBACK_BURST for h in hist]
+
+        n = len(y)
+        step = max(1, n // LSTM_EVAL_SAMPLES)
+        idx = list(range(0, n, step))[:LSTM_EVAL_SAMPLES]
+        _lstm_eval_cache = {
+            "samples": [{"id": k, "actual": float(y[i]), "predicted": float(preds[i])} for k, i in enumerate(idx)],
+            "mae": sum(abs(a - p) for a, p in zip(y, preds)) / n,
+            "baseline_mae": sum(abs(a - b) for a, b in zip(y, baseline)) / n,
+            "n": n,
+        }
+
+    return jsonify(_lstm_eval_cache)
 
 if __name__ == "__main__":
     app.run(debug=True, port=5001)

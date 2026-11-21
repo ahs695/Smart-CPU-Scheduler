@@ -19,12 +19,14 @@ from collections import defaultdict
 from typing import Dict, List, Tuple
 
 import numpy as np
-from scipy.stats import ttest_ind
+from scipy.stats import ttest_rel
+
+from backend.paths import results_path
 
 # Default file paths
-BASELINES_CSV = "results/baselines.csv"
-RL_CSV        = "results/rl_results.csv"
-SUMMARY_CSV   = "results/summary.csv"
+BASELINES_CSV = results_path("baselines.csv")
+RL_CSV        = results_path("rl_results.csv")
+SUMMARY_CSV   = results_path("summary.csv")
 
 # Which metrics to run t-tests on
 TEST_METRICS = [
@@ -40,16 +42,20 @@ METRIC_LABELS = {
     "fairness_index":      "Fairness Index",
 }
 
-# Pairwise comparisons: (RL algo, classical baseline)
+# Pairwise comparisons: (learned scheduler, reference). SRTF knows true
+# bursts, so "Hybrid vs SRTF" measures the remaining gap to the oracle.
 COMPARISONS = [
+    ("PPO",    "FCFS"),
     ("PPO",    "RR"),
     ("PPO",    "MLFQ"),
+    ("Hybrid", "PPO"),
+    ("Hybrid", "FCFS"),
     ("Hybrid", "RR"),
     ("Hybrid", "MLFQ"),
+    ("Hybrid", "SRTF"),
 ]
 
-# Workload labels (matches workload_factory.py)
-WORKLOAD_TYPES = ["cpu_heavy", "io_heavy", "mixed", "random"]
+from backend.experiments.workload_factory import WORKLOAD_TYPES
 
 
 # ------------------------------------------------------------
@@ -79,16 +85,19 @@ def load_csv(filepath: str) -> List[Dict]:
     return rows
 
 
-def _group_by(rows: List[Dict], algorithm: str, workload: str, metric: str) -> np.ndarray:
-    """
-    Extract a 1-D array of metric values for a specific (algorithm, workload) slice.
-    """
-    values = [
-        float(row[metric])
+def _by_run(rows: List[Dict], algorithm: str, workload: str, metric: str, cores=None) -> Dict[float, float]:
+    """{run_id: value} for one (algorithm, workload[, num_cores]) slice."""
+    return {
+        row["run_id"]: float(row[metric])
         for row in rows
         if row["algorithm"] == algorithm and row["workload_type"] == workload
-    ]
-    return np.array(values, dtype=float)
+        and (cores is None or row.get("num_cores") == cores)
+    }
+
+
+def _group_by(rows: List[Dict], algorithm: str, workload: str, metric: str, cores=None) -> np.ndarray:
+    """1-D array of metric values for a specific (algorithm, workload[, num_cores]) slice."""
+    return np.array(list(_by_run(rows, algorithm, workload, metric, cores).values()), dtype=float)
 
 
 # ------------------------------------------------------------
@@ -102,20 +111,25 @@ def run_comparison(
     workload: str,
     metric: str,
     alpha: float,
+    cores=None,
 ) -> Dict:
     """
-    Run an independent two-sample t-test between algo_a and algo_b
-    on a single metric for a given workload type.
+    Paired t-test between algo_a and algo_b on one metric for a workload type
+    (and core count). Both algorithms ran on the same seeded workloads, so runs
+    are paired by run_id.
 
     Returns a result dict with means, stds, t-statistic, p-value,
     and a significance flag.
     """
-    a_vals = _group_by(all_rows, algo_a, workload, metric)
-    b_vals = _group_by(all_rows, algo_b, workload, metric)
+    a_map = _by_run(all_rows, algo_a, workload, metric, cores)
+    b_map = _by_run(all_rows, algo_b, workload, metric, cores)
+    common = sorted(set(a_map) & set(b_map))
+    a_vals = np.array([a_map[k] for k in common], dtype=float)
+    b_vals = np.array([b_map[k] for k in common], dtype=float)
 
-    if len(a_vals) < 2 or len(b_vals) < 2:
+    if len(common) < 2:
         return {
-            "algo_a": algo_a, "algo_b": algo_b,
+            "algo_a": algo_a, "algo_b": algo_b, "num_cores": cores,
             "workload": workload, "metric": metric,
             "mean_a": None, "std_a": None,
             "mean_b": None, "std_b": None,
@@ -125,11 +139,15 @@ def run_comparison(
             "error": "Insufficient data (< 2 samples per group)",
         }
 
-    t_stat, p_value = ttest_ind(a_vals, b_vals, equal_var=False)  # Welch's t-test
+    if np.allclose(a_vals, b_vals):
+        t_stat, p_value = 0.0, 1.0      # identical results: no difference
+    else:
+        t_stat, p_value = ttest_rel(a_vals, b_vals)
 
     return {
         "algo_a":      algo_a,
         "algo_b":      algo_b,
+        "num_cores":   cores,
         "workload":    workload,
         "metric":      metric,
         "mean_a":      float(np.mean(a_vals)),
@@ -166,16 +184,16 @@ def print_results(results: List[Dict], alpha: float):
     # Group: (algo_a, algo_b, workload) → list of per-metric results
     grouped = defaultdict(list)
     for r in results:
-        key = (r["algo_a"], r["algo_b"], r["workload"])
+        key = (r["algo_a"], r["algo_b"], r["workload"], r.get("num_cores"))
         grouped[key].append(r)
 
-    for (algo_a, algo_b, workload) in grouped:
+    for (algo_a, algo_b, workload, cores) in grouped:
         print()
         print("─" * 62)
-        print(f"  Algorithm Comparison: {algo_a} vs {algo_b}  [{workload}]")
+        print(f"  Algorithm Comparison: {algo_a} vs {algo_b}  [{workload}, {cores} cores]")
         print("─" * 62)
 
-        for r in grouped[(algo_a, algo_b, workload)]:
+        for r in grouped[(algo_a, algo_b, workload, cores)]:
             label = METRIC_LABELS.get(r["metric"], r["metric"])
 
             if r["error"]:
@@ -204,7 +222,7 @@ def print_results(results: List[Dict], alpha: float):
             direction = "↓ lower" if r["mean_a"] < r["mean_b"] else "↑ higher"
             print(
                 f"  {r['algo_a']:<8} vs {r['algo_b']:<6}"
-                f"  [{r['workload']:<10}]"
+                f"  [{r['workload']:<10} {r.get('num_cores')}c]"
                 f"  {label:<20}"
                 f"  p={r['p_value']:.4f}  {direction}"
             )
@@ -221,7 +239,7 @@ def save_summary(results: List[Dict], filepath: str = SUMMARY_CSV):
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
     fieldnames = [
-        "algo_a", "algo_b", "workload", "metric",
+        "algo_a", "algo_b", "num_cores", "workload", "metric",
         "mean_a", "std_a", "mean_b", "std_b",
         "t_stat", "p_value", "significant", "n_a", "n_b", "error",
     ]
@@ -246,6 +264,7 @@ def print_aggregate_summary(all_rows: List[Dict]):
     """
     algos     = sorted(set(r["algorithm"]     for r in all_rows))
     workloads = sorted(set(r["workload_type"] for r in all_rows))
+    cores_list = sorted(set(r["num_cores"] for r in all_rows if "num_cores" in r)) or [None]
     metrics   = ["avg_waiting_time", "avg_turnaround_time", "fairness_index"]
 
     print()
@@ -253,21 +272,22 @@ def print_aggregate_summary(all_rows: List[Dict]):
     print("  AGGREGATE RESULTS TABLE")
     print("=" * 62)
 
-    for workload in workloads:
-        print(f"\n  Workload: {workload}")
-        header = f"  {'Algorithm':<12}" + "".join(f"  {METRIC_LABELS[m]:<22}" for m in metrics)
-        print(header)
-        print("  " + "-" * (len(header) - 2))
+    for cores in cores_list:
+        for workload in workloads:
+            print(f"\n  Workload: {workload}   Cores: {cores}")
+            header = f"  {'Algorithm':<12}" + "".join(f"  {METRIC_LABELS[m]:<22}" for m in metrics)
+            print(header)
+            print("  " + "-" * (len(header) - 2))
 
-        for algo in algos:
-            row_str = f"  {algo:<12}"
-            for m in metrics:
-                vals = _group_by(all_rows, algo, workload, m)
-                if len(vals) == 0:
-                    row_str += f"  {'N/A':<22}"
-                else:
-                    row_str += f"  {np.mean(vals):.3f} ± {np.std(vals, ddof=1):.3f}        "
-            print(row_str)
+            for algo in algos:
+                row_str = f"  {algo:<12}"
+                for m in metrics:
+                    vals = _group_by(all_rows, algo, workload, m, cores)
+                    if len(vals) == 0:
+                        row_str += f"  {'N/A':<22}"
+                    else:
+                        row_str += f"  {np.mean(vals):.3f} ± {np.std(vals, ddof=1) if len(vals) > 1 else 0:.3f}        "
+                print(row_str)
 
 
 # ------------------------------------------------------------
@@ -301,12 +321,12 @@ def main():
     args = parser.parse_args()
 
     print("=" * 62)
-    print("  Phase 6 — Statistical Validation (Welch's t-test)")
+    print("  Phase 6 — Statistical Validation (paired t-test)")
     print("=" * 62)
     print(f"  Baselines CSV : {args.baselines}")
     print(f"  RL CSV        : {args.rl}")
     print(f"  α (alpha)     : {args.alpha}")
-    print(f"  Comparisons   : {len(COMPARISONS)} pairs × {len(WORKLOAD_TYPES)} workloads × {len(TEST_METRICS)} metrics")
+    print(f"  Comparisons   : {len(COMPARISONS)} pairs × {len(WORKLOAD_TYPES)} workloads × cores × {len(TEST_METRICS)} metrics (paired t-test)")
     print("=" * 62)
 
     # --- Load data
@@ -320,18 +340,21 @@ def main():
 
     # --- Run all t-tests
     results = []
-    for algo_a, algo_b in COMPARISONS:
-        for workload in WORKLOAD_TYPES:
-            for metric in TEST_METRICS:
-                r = run_comparison(
-                    all_rows=all_rows,
-                    algo_a=algo_a,
-                    algo_b=algo_b,
-                    workload=workload,
-                    metric=metric,
-                    alpha=args.alpha,
-                )
-                results.append(r)
+    cores_list = sorted(set(r["num_cores"] for r in all_rows if "num_cores" in r)) or [None]
+    for cores in cores_list:
+        for algo_a, algo_b in COMPARISONS:
+            for workload in WORKLOAD_TYPES:
+                for metric in TEST_METRICS:
+                    r = run_comparison(
+                        all_rows=all_rows,
+                        algo_a=algo_a,
+                        algo_b=algo_b,
+                        workload=workload,
+                        metric=metric,
+                        alpha=args.alpha,
+                        cores=cores,
+                    )
+                    results.append(r)
 
     # --- Print results
     print_results(results, alpha=args.alpha)

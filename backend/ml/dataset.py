@@ -1,11 +1,24 @@
-import random
-from typing import List, Tuple
+# backend/ml/dataset.py
+"""
+Datasets for the LSTM burst predictor.
 
+Samples come from the same workload generator the RL agents train on. Every
+job's burst is predicted from the bursts of earlier jobs of the *same program*
+(normalised, left-padded; see history_window in lstm_model.py). At run time
+the Hybrid env only knows the bursts of jobs that have already finished, so
+the most recent 0-2 same-program jobs are randomly dropped from each history
+to mimic jobs still running. Workloads without program labels use the
+history of all earlier jobs.
+"""
+
+from typing import Dict, List, Optional, Sequence, Tuple
+
+import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from backend.simulator.process import Process
-from backend.simulator.workload_generator import WorkloadGenerator
+from backend.ml.lstm_model import history_window, normalize_burst
+from backend.simulator.workload_generator import BURST_PATTERNS, sample_jobs
 
 
 class BurstDataset(Dataset):
@@ -13,8 +26,8 @@ class BurstDataset(Dataset):
     PyTorch dataset for CPU burst prediction.
 
     Each sample:
-        input  -> sequence of past burst lengths
-        target -> next burst length
+        input  -> SEQ_LENGTH normalised previous bursts
+        target -> normalised next burst
     """
 
     def __init__(self, sequences: List[List[float]], targets: List[float]):
@@ -25,170 +38,55 @@ class BurstDataset(Dataset):
         return len(self.sequences)
 
     def __getitem__(self, idx):
-
         return self.sequences[idx], self.targets[idx]
 
 
-# ------------------------------------------------------------
-
-
 class DatasetBuilder:
-    """
-    Builds datasets for LSTM burst prediction.
-    """
-
-    # ------------------------------------------------------------
+    """Builds burst-prediction samples from generated workloads."""
 
     @staticmethod
-    def sliding_window(
-        bursts: List[int],
-        sequence_length: int
-    ) -> Tuple[List[List[int]], List[int]]:
-        """
-        Convert burst list into sliding window dataset.
-        """
-
-        X = []
-        y = []
-
-        for i in range(len(bursts) - sequence_length):
-
-            seq = bursts[i:i + sequence_length]
-            target = bursts[i + sequence_length]
-
-            X.append(seq)
-            y.append(target)
-
-        return X, y
-
-    # ------------------------------------------------------------
+    def histories(bursts: Sequence[int], programs: Sequence, rng) -> List[List[int]]:
+        """Known same-program history (raw bursts) for each job, in arrival order."""
+        seen: Dict[object, List[int]] = {}
+        out = []
+        for burst, prog in zip(bursts, programs):
+            past = seen.setdefault(prog, [])
+            drop = int(rng.integers(0, 3))
+            out.append(past[: max(0, len(past) - drop)])
+            past.append(burst)
+        return out
 
     @staticmethod
-    def generate_synthetic_sequences(
-        num_sequences: int = 1000,
-        seq_length: int = 5
-    ) -> Tuple[List[List[int]], List[int]]:
+    def generate(
+        num_workloads: int,
+        seed: int,
+        patterns: Optional[Sequence[str]] = None,
+        min_len: int = 20,
+        max_len: int = 80,
+    ) -> Dict[str, Tuple[List[List[float]], List[float], List[List[int]]]]:
         """
-        Generate synthetic CPU burst patterns.
+        Generate samples grouped by burst pattern.
+
+        Returns {pattern: (X, y, raw_histories)} where raw_histories holds the
+        un-normalised known history of each job (for naive baselines).
         """
-
-        sequences = []
-        targets = []
-
-        for _ in range(num_sequences):
-
-            base = random.randint(5, 20)
-
-            bursts = []
-
-            for _ in range(seq_length + 1):
-
-                noise = random.randint(-3, 3)
-                burst = max(1, base + noise)
-
-                bursts.append(burst)
-
-            X, y = DatasetBuilder.sliding_window(bursts, seq_length)
-
-            sequences.extend(X)
-            targets.extend(y)
-
-        return sequences, targets
-
-    # ------------------------------------------------------------
+        rng = np.random.default_rng(seed)
+        patterns = list(patterns or BURST_PATTERNS)
+        out = {p: ([], [], []) for p in patterns}
+        for _ in range(num_workloads):
+            pattern = patterns[int(rng.integers(len(patterns)))]
+            bursts, programs = sample_jobs(pattern, int(rng.integers(min_len, max_len + 1)), rng)
+            if rng.random() < 0.1:
+                programs = [None] * len(bursts)
+            for burst, hist in zip(bursts, DatasetBuilder.histories(bursts, programs, rng)):
+                out[pattern][0].append(history_window(hist))
+                out[pattern][1].append(normalize_burst(burst))
+                out[pattern][2].append(hist)
+        return out
 
     @staticmethod
-    def from_workload_generator(
-        num_processes: int = 200,
-        seq_length: int = 5
-    ) -> Tuple[List[List[int]], List[int]]:
-        """
-        Generate dataset using workload generator bursts.
-        """
-
-        processes = WorkloadGenerator.mixed(num_processes)
-
-        bursts = [p.burst_time for p in processes]
-
-        return DatasetBuilder.sliding_window(bursts, seq_length)
-
-    # ------------------------------------------------------------
-
-    @staticmethod
-    def from_simulator_traces(
-        gantt_chart,
-        seq_length: int = 5
-    ) -> Tuple[List[List[int]], List[int]]:
-        """
-        Extract burst sequences from simulator execution traces.
-
-        gantt_chart format:
-            {core_id: [pid, pid, None, pid, ...]}
-        """
-
-        burst_sequences = {}
-
-        for core in gantt_chart:
-
-            timeline = gantt_chart[core]
-
-            prev = None
-            count = 0
-
-            for pid in timeline:
-
-                if pid == prev:
-                    count += 1
-                else:
-
-                    if prev is not None:
-                        burst_sequences.setdefault(prev, []).append(count)
-
-                    prev = pid
-                    count = 1
-
-            if prev is not None:
-                burst_sequences.setdefault(prev, []).append(count)
-
-        bursts = []
-
-        for pid in burst_sequences:
-            bursts.extend(burst_sequences[pid])
-
-        return DatasetBuilder.sliding_window(bursts, seq_length)
-
-    # ------------------------------------------------------------
-
-    @staticmethod
-    def normalize(sequences, targets):
-        """
-        Normalize burst values for stable training.
-        """
-
-        max_val = max(max(seq) for seq in sequences)
-
-        sequences = [[v / max_val for v in seq] for seq in sequences]
-        targets = [v / max_val for v in targets]
-
-        return sequences, targets, max_val
-
-    # ------------------------------------------------------------
-
-    @staticmethod
-    def build_dataset(
-        num_sequences: int = 1000,
-        seq_length: int = 5
-    ) -> BurstDataset:
-        """
-        Build final PyTorch dataset.
-        """
-
-        X, y = DatasetBuilder.generate_synthetic_sequences(
-            num_sequences,
-            seq_length
-        )
-
-        X, y, _ = DatasetBuilder.normalize(X, y)
-
+    def build_dataset(num_workloads: int, seed: int, patterns: Optional[Sequence[str]] = None) -> BurstDataset:
+        groups = DatasetBuilder.generate(num_workloads, seed, patterns)
+        X = [x for g in groups.values() for x in g[0]]
+        y = [t for g in groups.values() for t in g[1]]
         return BurstDataset(X, y)
-    

@@ -15,6 +15,9 @@ class Process:
     arrival_time: int
     burst_time: int
     priority: int = 0
+    # Optional observable job identity (executable / user). Jobs of the same
+    # program have similar bursts; the Hybrid's LSTM predicts from that history.
+    program: Optional[object] = None
 
     # Runtime fields (initialized later)
     remaining_time: int = field(init=False)

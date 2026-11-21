@@ -63,3 +63,38 @@ class BurstPredictorLSTM(nn.Module):
         prediction = self.fc(last_output)
 
         return prediction.squeeze(-1)
+
+# ------------------------------------------------------------
+# Shared constants — used by the dataset, training, the Hybrid env and the API,
+# so every consumer feeds the model identically scaled inputs.
+# ------------------------------------------------------------
+
+SEQ_LENGTH = 8      # number of previous bursts the model sees
+MAX_BURST = 50.0    # bursts are divided by this (and clipped to [0, 1])
+
+
+def normalize_burst(burst: float) -> float:
+    return min(max(burst / MAX_BURST, 0.0), 1.0)
+
+
+def history_window(previous_bursts) -> list:
+    """Last SEQ_LENGTH normalised bursts, left-padded with 0.0 when history is short."""
+    window = [normalize_burst(b) for b in list(previous_bursts)[-SEQ_LENGTH:]]
+    return [0.0] * (SEQ_LENGTH - len(window)) + window
+
+
+def load_lstm(path: str, device: str = "cpu"):
+    """Load a BurstPredictorLSTM checkpoint (plain state_dict or {'model_state_dict': ...})."""
+    import os
+
+    model = BurstPredictorLSTM()
+    if os.path.exists(path):
+        checkpoint = torch.load(path, map_location=device)
+        if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+            checkpoint = checkpoint["model_state_dict"]
+        model.load_state_dict(checkpoint)
+    else:
+        model = None
+    if model is not None:
+        model.to(device).eval()
+    return model

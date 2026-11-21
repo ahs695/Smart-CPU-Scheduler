@@ -1,50 +1,45 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import axios from 'axios';
 import { schedulerService } from '../services/api';
 import InputPanel from './InputPanel';
 import GanttChart from './GanttChart';
 import '../App.css';
 import MetricsPanel from './MetricsPanel';
-import { RewardCurve, LSTMPredictionChart, ComparisonChart } from './TrainingCharts';
-import { Activity, Brain, BarChart3, Info, AlertCircle, Cpu, Sparkles } from 'lucide-react';
+import { LSTMPredictionChart, ComparisonChart } from './TrainingCharts';
+import { Activity, BarChart3, Info, AlertCircle, Cpu, Sparkles } from 'lucide-react';
+
+// Wait this long after the last workload/cores/quantum edit before re-running /compare
+const COMPARE_DEBOUNCE_MS = 400;
 
 export default function Dashboard() {
   const [simulationData, setSimulationData] = useState(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const [comparisonData, setComparisonData] = useState([]);
   const [isComparing, setIsComparing] = useState(false);
-  const [rewardData, setRewardData] = useState([]);
-  const [lstmSamples, setLstmSamples] = useState([]);
+  const [compareCores, setCompareCores] = useState(2);
+  // { status: 'loading' | 'ok' | 'unavailable', samples, mae, baseline_mae }
+  const [lstmEval, setLstmEval] = useState({ status: 'loading' });
   const [backendStatus, setBackendStatus] = useState('loading');
   const [error, setError] = useState(null);
-  const [showMetricsTable, setShowMetricsTable] = useState(false);
   const [lastSimConfig, setLastSimConfig] = useState(null);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [rew, lstm, status] = await Promise.all([
-          schedulerService.getRewardCurve(),
-          schedulerService.getLSTMPredictions(),
-          schedulerService.checkStatus()
-        ]);
-        setRewardData(rew.data);
-        setLstmSamples(lstm.data);
-        setBackendStatus('online');
-      } catch (err) {
-        console.error("Failed to fetch initial data", err);
-        setBackendStatus('offline');
-      }
-    };
-    fetchData();
-  }, []);
+  const compareTimerRef = useRef(null);
+  const compareAbortRef = useRef(null);
 
-  const fetchComparison = async (config) => {
+  // Only the most recent /compare request is allowed to update state:
+  // starting a new one aborts the previous in-flight request.
+  const fetchComparison = useCallback(async (config) => {
+    compareAbortRef.current?.abort();
+    const controller = new AbortController();
+    compareAbortRef.current = controller;
+
     setIsComparing(true);
     try {
       const comp = await schedulerService.compareProcesses({
         processes: config.processes,
         num_cores: config.num_cores,
-      });
+        quantum: config.quantum,
+      }, { signal: controller.signal });
       const raw = comp.data;
       if (raw && raw.comparison) {
         const arr = Object.entries(raw.comparison)
@@ -56,13 +51,46 @@ export default function Dashboard() {
             fairness:   v.metrics.fairness_index      ?? 0,
           }));
         setComparisonData(arr);
+        setCompareCores(config.num_cores);
       }
     } catch (err) {
+      if (axios.isCancel(err)) return; // superseded by a newer request
       console.error("Failed to fetch comparison data", err);
     } finally {
-      setIsComparing(false);
+      if (compareAbortRef.current === controller) {
+        compareAbortRef.current = null;
+        setIsComparing(false);
+      }
     }
-  };
+  }, []);
+
+  // Called by InputPanel on mount and whenever workload, cores or quantum change.
+  const handleConfigChange = useCallback((config) => {
+    clearTimeout(compareTimerRef.current);
+    compareTimerRef.current = setTimeout(() => fetchComparison(config), COMPARE_DEBOUNCE_MS);
+  }, [fetchComparison]);
+
+  useEffect(() => () => {
+    clearTimeout(compareTimerRef.current);
+    compareAbortRef.current?.abort();
+  }, []);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      const [status, lstm] = await Promise.allSettled([
+        schedulerService.checkStatus(),
+        schedulerService.getLSTMPredictions(),
+      ]);
+      setBackendStatus(status.status === 'fulfilled' ? 'online' : 'offline');
+      if (lstm.status === 'fulfilled') {
+        setLstmEval({ status: 'ok', ...lstm.value.data });
+      } else {
+        console.error("Failed to fetch LSTM predictions", lstm.reason);
+        setLstmEval({ status: 'unavailable' });
+      }
+    };
+    fetchData();
+  }, []);
 
   const handleSimulate = async (config) => {
     setIsSimulating(true);
@@ -71,7 +99,6 @@ export default function Dashboard() {
       const response = await schedulerService.simulate(config);
       setSimulationData(response.data);
       setLastSimConfig(config);
-      fetchComparison(config);
     } catch (err) {
       setError(err.response?.data?.error || "Simulation failed. Please check if the backend is running.");
       console.error(err);
@@ -133,6 +160,7 @@ export default function Dashboard() {
             <InputPanel 
               onSimulate={handleSimulate} 
               isSimulating={isSimulating}
+              onConfigChange={handleConfigChange}
             />
           </section>
 
@@ -141,7 +169,11 @@ export default function Dashboard() {
               <BarChart3 size={14} className="text-secondary" />
               <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-secondary/80">Analytics & Comparison</h2>
             </div>
-            <ComparisonChart data={comparisonData} />
+            <ComparisonChart 
+              data={comparisonData} 
+              numCores={compareCores}
+              isLoading={isComparing} 
+            />
           </section>
         </div>
 
@@ -153,9 +185,12 @@ export default function Dashboard() {
                 <Activity size={14} className="text-accent" />
                 <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-accent/80">Live Execution Visualization</h2>
               </div>
-              {simulationData && (
+              {simulationData && lastSimConfig && (
                 <div className="text-[10px] font-bold bg-primary/10 text-primary border border-primary/20 px-3 py-1 rounded-full uppercase tracking-tighter shadow-[0_0_10px_rgba(6,182,212,0.15)]">
-                  ALGO: {simulationData.metrics.total_processes} PROCS
+                  {lastSimConfig.scheduler}
+                  {lastSimConfig.scheduler === 'RR' && ` (q=${lastSimConfig.quantum})`}
+                  {' · '}{simulationData.metrics.total_processes} PROCS
+                  {' · '}{lastSimConfig.num_cores} {lastSimConfig.num_cores === 1 ? 'CORE' : 'CORES'}
                 </div>
               )}
             </div>
@@ -180,7 +215,7 @@ export default function Dashboard() {
                           </tr>
                         </thead>
                         <tbody>
-                          {comparisonData.map((data, index) => (
+                          {comparisonData.map((data) => (
                             <tr key={data.name} className="border-b border-white/[0.04] hover:bg-white/[0.03] transition-colors">
                               <td className="py-4 px-4 font-bold text-primary">{data.name}</td>
                               <td className="py-4 px-4 text-right font-mono text-mtx4">{data.waiting.toFixed(1)}</td>
@@ -210,8 +245,7 @@ export default function Dashboard() {
             )}
           </section>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-</div>
+          <LSTMPredictionChart evaluation={lstmEval} />
 
 {/* How to Use + AI Insights row */}
 
@@ -237,7 +271,7 @@ export default function Dashboard() {
         </div>
         <div>
           <h4 className="text-sm font-bold text-mtx4">Pick a Scheduler</h4>
-          <p className="mt-1">Use <span className="text-secondary font-semibold">Hybrid</span> or <span className="text-secondary font-semibold">PPO</span> for AI-driven scheduling (fixed 2 cores), or benchmark against FCFS, SJF, RR, or MLFQ.</p>
+          <p className="mt-1">Use <span className="text-secondary font-semibold">Hybrid</span> or <span className="text-secondary font-semibold">PPO</span> for AI-driven scheduling (trained models for 1, 2, 4 and 8 cores), or benchmark against FCFS, SJF, RR, or MLFQ.</p>
         </div>
       </div>
       <div className="flex gap-3">
@@ -246,7 +280,7 @@ export default function Dashboard() {
         </div>
         <div>
           <h4 className="text-sm font-bold text-mtx4">Read the Gantt Chart</h4>
-          <p className="mt-1">The top-right panel animates per-core execution live. Use <span className="text-accent font-semibold">1x–10x</span> playback speed to inspect or fast-forward scheduling decisions.</p>
+          <p className="mt-1">The Live Execution panel animates per-core execution after each run. Use <span className="text-accent font-semibold">1x–10x</span> playback speed to inspect or fast-forward scheduling decisions.</p>
         </div>
       </div>
       <div className="flex gap-3">
@@ -264,7 +298,7 @@ export default function Dashboard() {
         </div>
         <div>
           <h4 className="text-sm font-bold text-mtx4">Compare All Algorithms</h4>
-          <p className="mt-1">The comparison table and benchmark chart (bottom-left) rank all schedulers after each run — use them to justify algorithm choice for your workload type.</p>
+          <p className="mt-1">The benchmark chart (under Simulation Control) and the comparison table re-run every scheduler whenever you change the workload, cores or quantum — use them to justify algorithm choice for your workload type.</p>
         </div>
       </div>
     </div>

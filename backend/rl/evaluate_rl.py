@@ -4,13 +4,14 @@ import os
 import torch
 from stable_baselines3 import PPO
 
-from backend.ml.lstm_model import BurstPredictorLSTM
+from backend.ml.lstm_model import load_lstm
 from backend.rl.env import SchedulingEnv
 from backend.hybrid.hybrid_scheduler import HybridSchedulingEnv
 
 from backend.simulator.workload_generator import WorkloadGenerator
 from backend.simulator.multi_core_simulator import MultiCoreSimulator
 from backend.simulator.metrics import MetricsEngine
+from backend.paths import LSTM_MODEL_PATH, ppo_model_candidates
 
 # Classical schedulers
 from backend.simulator.traditional.fcfs import FCFSScheduler
@@ -23,34 +24,28 @@ class RLEvaluator:
 
     def __init__(
         self,
-        ppo_path="models/ppo_scheduler_ppo.zip",
-        hybrid_path="models/ppo_scheduler_hybrid.zip",
-        lstm_path="models/lstm_model.pt",
+        ppo_path=None,
+        hybrid_path=None,
+        lstm_path=LSTM_MODEL_PATH,
         num_processes=30,
         num_cores=2
     ):
         self.num_processes = num_processes
         self.num_cores = num_cores
-        
-        # Load Baseline PPO model if available
-        self.ppo_model = PPO.load(ppo_path) if os.path.exists(ppo_path) else None
-        
-        # Load Hybrid PPO model if available
-        self.hybrid_model = PPO.load(hybrid_path) if os.path.exists(hybrid_path) else None
-        
-        # Backwards compatibility check for the un-suffixed hybrid model trained previously
-        if not self.hybrid_model and os.path.exists("models/ppo_scheduler.zip"):
-            self.hybrid_model = PPO.load("models/ppo_scheduler.zip")
-            
+
+        # Explicit paths win; otherwise use the model trained for this core count
+        self.ppo_model = self._load_policy(ppo_path, "ppo")
+        self.hybrid_model = self._load_policy(hybrid_path, "hybrid")
+
         # Load LSTM prediction module gracefully for Hybrid logic
-        self.lstm = BurstPredictorLSTM()
-        if os.path.exists(lstm_path):
-            checkpoint = torch.load(lstm_path, map_location="cpu")
-            if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
-                self.lstm.load_state_dict(checkpoint["model_state_dict"])
-            else:
-                self.lstm.load_state_dict(checkpoint)
-        self.lstm.eval()
+        self.lstm = load_lstm(lstm_path)
+
+    def _load_policy(self, path, mode):
+        candidates = [path] if path else ppo_model_candidates(mode, self.num_cores)
+        for p in candidates:
+            if os.path.exists(p):
+                return PPO.load(p)
+        return None
 
     # ------------------------------------------------------------
 
@@ -65,7 +60,7 @@ class RLEvaluator:
                 processes=processes,
                 num_cores=self.num_cores,
                 max_queue_size=50,
-                max_steps=100000,
+                max_steps=15000,
                 lstm_model=self.lstm,
                 use_predictions=True
             )
@@ -74,7 +69,7 @@ class RLEvaluator:
                 processes=processes,
                 num_cores=self.num_cores,
                 max_queue_size=50,
-                max_steps=100000
+                max_steps=15000
             )
 
         state, _ = env.reset()
@@ -99,7 +94,7 @@ class RLEvaluator:
                 break
                 
             if truncated:
-                print(f"⚠ [{mode.upper()}] Episode unexpectedly truncated (hit 100k limit).")
+                print(f"⚠ [{mode.upper()}] Episode unexpectedly truncated (hit max_steps limit).")
                 break
 
             if steps >= safety_max:

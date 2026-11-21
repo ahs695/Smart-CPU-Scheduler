@@ -1,41 +1,58 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Play, Zap, Monitor, Layers, AlertCircle,Upload } from 'lucide-react';
+import { Plus, Trash2, Play, Zap, Monitor, Layers, AlertCircle, Upload } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 const WORKLOAD_PRESETS = [
   { name: 'Mixed', icon: Layers, data: [
-    { arrival: 0, burst: 12, priority: 1, pid: 0 },
-    { arrival: 2, burst: 4, priority: 2, pid: 1 },
-    { arrival: 5, burst: 8, priority: 1, pid: 2 },
-    { arrival: 8, burst: 2, priority: 3, pid: 3 },
+    { arrival: 0, burst: 12, priority: 1, pid: 0, program: 'build' },
+    { arrival: 2, burst: 4, priority: 2, pid: 1, program: 'shell' },
+    { arrival: 5, burst: 8, priority: 1, pid: 2, program: 'build' },
+    { arrival: 8, burst: 2, priority: 3, pid: 3, program: 'shell' },
   ]},
   { name: 'Compute Heavy', icon: Monitor, data: [
-    { arrival: 0, burst: 40, priority: 1, pid: 0 },
-    { arrival: 1, burst: 35, priority: 1, pid: 1 },
-    { arrival: 2, burst: 45, priority: 1, pid: 2 },
+    { arrival: 0, burst: 40, priority: 1, pid: 0, program: 'render' },
+    { arrival: 1, burst: 35, priority: 1, pid: 1, program: 'render' },
+    { arrival: 2, burst: 45, priority: 1, pid: 2, program: 'render' },
   ]},
   { name: 'IO Intensive', icon: Zap, data: [
-    { arrival: 0, burst: 2, priority: 1, pid: 0 },
-    { arrival: 1, burst: 3, priority: 1, pid: 1 },
-    { arrival: 2, burst: 2, priority: 1, pid: 2 },
-    { arrival: 3, burst: 4, priority: 1, pid: 3 },
-    { arrival: 4, burst: 2, priority: 1, pid: 4 },
+    { arrival: 0, burst: 2, priority: 1, pid: 0, program: 'shell' },
+    { arrival: 1, burst: 3, priority: 1, pid: 1, program: 'grep' },
+    { arrival: 2, burst: 2, priority: 1, pid: 2, program: 'shell' },
+    { arrival: 3, burst: 4, priority: 1, pid: 3, program: 'grep' },
+    { arrival: 4, burst: 2, priority: 1, pid: 4, program: 'shell' },
   ]}
 ];
 
-export default function InputPanel({ onSimulate, isSimulating }) {
-  const [processes, setProcesses] = useState(WORKLOAD_PRESETS[0].data);
+// Fresh row objects, so edits can never write back into WORKLOAD_PRESETS
+const copyRows = (rows) => rows.map((p) => ({ ...p }));
+
+// Lowest allowed value per field. A burst of 0 would never "complete" in the simulator.
+const FIELD_MIN = { arrival: 0, burst: 1, priority: 0 };
+
+export default function InputPanel({ onSimulate, isSimulating, onConfigChange }) {
+  const [processes, setProcesses] = useState(() => copyRows(WORKLOAD_PRESETS[0].data));
   const [scheduler, setScheduler] = useState('HYBRID');
   const [cores, setCores] = useState(2);
+  // quantum is the last valid value (>= 1); quantumText is what's in the box,
+  // so the field can be cleared mid-edit without sending an invalid value.
+  const [quantum, setQuantum] = useState(2);
+  const [quantumText, setQuantumText] = useState('2');
 
-  const isAIScheduler = ['HYBRID', 'PPO'].includes(scheduler);
-
-  // AI models are currently trained for fixed 2-core environments
-  useEffect(() => {
-    if (isAIScheduler) {
-      setCores(2);
+  const handleQuantumChange = (value) => {
+    setQuantumText(value);
+    const parsed = Number(value);
+    if (Number.isInteger(parsed) && parsed >= 1) {
+      setQuantum(parsed);
     }
-  }, [scheduler]);
+  };
+
+  // Notify parent when anything the comparison depends on changes. The selected
+  // scheduler is deliberately excluded: /compare runs every scheduler anyway.
+  useEffect(() => {
+    if (onConfigChange) {
+      onConfigChange({ num_cores: cores, quantum, processes });
+    }
+  }, [cores, processes, quantum, onConfigChange]);
 
   const addProcess = () => {
     const lastPid = processes.length > 0 ? processes[processes.length - 1].pid : -1;
@@ -43,32 +60,31 @@ export default function InputPanel({ onSimulate, isSimulating }) {
       pid: lastPid + 1, 
       arrival: 0, 
       burst: 5, 
-      priority: 1 
+      priority: 1,
+      program: '',
     }]);
   };
 
   const updateProcess = (index, field, value) => {
-  const updated = [...processes];
+    const newValue = parseInt(value, 10);
+    if (isNaN(newValue)) return;
 
-  const newValue = parseInt(value);
-  if (isNaN(newValue)) return;
+    const clamped = Math.max(FIELD_MIN[field] ?? 0, newValue);
+    // Replace the edited row with a new object instead of mutating it in place
+    setProcesses(processes.map((p, i) => (i === index ? { ...p, [field]: clamped } : p)));
+  };
 
-  const currentValue = updated[index][field];
-  if (currentValue === 0 && newValue < currentValue) {
-    return; 
-  }
-
-  updated[index][field] = Math.max(0, newValue);
-
-  setProcesses(updated);
-};
+  // Program is a free-text label (executable / user); blank means unknown
+  const updateProgram = (index, value) => {
+    setProcesses(processes.map((p, i) => (i === index ? { ...p, program: value.slice(0, 24) } : p)));
+  };
 
   const removeProcess = (index) => {
     setProcesses(processes.filter((_, i) => i !== index));
   };
 
   const applyPreset = (data) => {
-    setProcesses(data);
+    setProcesses(copyRows(data));
   };
 
   const handleFileUpload = (event) => {
@@ -83,10 +99,19 @@ export default function InputPanel({ onSimulate, isSimulating }) {
         if (lines.length < 2) return; // Need header + data
         
         const headers = lines[0].toLowerCase().split(',').map(h => h.trim());
-        const pidIdx = headers.findIndex(h => h.includes('pid') || h.includes('id'));
-        const arrivalIdx = headers.findIndex(h => h.includes('arrival') || h.includes('arrive'));
-        const burstIdx = headers.findIndex(h => h.includes('burst') || h.includes('time'));
-        const priorityIdx = headers.findIndex(h => h.includes('priority') || h.includes('prio'));
+        const findCol = (...tests) => {
+          for (const test of tests) {
+            const idx = headers.findIndex(test);
+            if (idx >= 0) return idx;
+          }
+          return -1;
+        };
+        const pidIdx = findCol(h => h === 'pid' || h === 'id', h => h.includes('pid'));
+        const arrivalIdx = findCol(h => h.includes('arrival') || h.includes('arrive'));
+        // Prefer an explicit "burst" column; "time" alone would also match "arrival_time"
+        const burstIdx = findCol(h => h.includes('burst'), h => h.includes('time') && !h.includes('arriv'));
+        const priorityIdx = findCol(h => h.includes('priority') || h.includes('prio'));
+        const programIdx = findCol(h => h.includes('program') || h.includes('command') || h === 'cmd' || h.includes('exe'));
 
         const newProcesses = [];
         for (let i = 1; i < lines.length; i++) {
@@ -95,9 +120,10 @@ export default function InputPanel({ onSimulate, isSimulating }) {
 
           newProcesses.push({
             pid: pidIdx >= 0 ? parseInt(values[pidIdx]) : i - 1,
-            arrival: arrivalIdx >= 0 ? parseInt(values[arrivalIdx]) || 0 : 0,
-            burst: burstIdx >= 0 ? parseInt(values[burstIdx]) || 5 : 5,
-            priority: priorityIdx >= 0 ? parseInt(values[priorityIdx]) || 1 : 1,
+            arrival: Math.max(FIELD_MIN.arrival, arrivalIdx >= 0 ? parseInt(values[arrivalIdx]) || 0 : 0),
+            burst: Math.max(FIELD_MIN.burst, burstIdx >= 0 ? parseInt(values[burstIdx]) || 5 : 5),
+            priority: Math.max(FIELD_MIN.priority, priorityIdx >= 0 ? parseInt(values[priorityIdx]) || 1 : 1),
+            program: programIdx >= 0 ? (values[programIdx] || '').slice(0, 24) : '',
           });
         }
         
@@ -134,22 +160,15 @@ export default function InputPanel({ onSimulate, isSimulating }) {
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between pl-1">
             <label className="text-xs text-primary/70 uppercase font-bold tracking-widest">CPU Cores</label>
-            {isAIScheduler && (
-              <span className="text-[10px] text-primary font-bold flex items-center gap-1 bg-primary/10 px-1 py-0.5 rounded-full">
-                 Optimized for 2
-              </span>
-            )}
           </div>
           <div className="flex gap-2">
             {[1, 2, 4, 8].map(c => (
               <button
                 key={c}
-                disabled={isAIScheduler && c !== 2}
                 onClick={() => setCores(c)}
                 className={cn(
                   "flex-1 py-2 rounded-lg border transition-all text-sm font-bold",
-                  cores === c ? "bg-primary/20 border-primary text-primary" : "border-mtx1 text-mtx3 hover:border-white",
-                  isAIScheduler && c !== 2 && "opacity-20 grayscale cursor-not-allowed border-dashed"
+                  cores === c ? "bg-primary/20 border-primary text-primary" : "border-mtx1 text-mtx3 hover:border-white"
                 )}
               >
                 {c}
@@ -157,6 +176,31 @@ export default function InputPanel({ onSimulate, isSimulating }) {
             ))}
           </div>
         </div>
+      </div>
+
+      {/* Round Robin quantum — always visible: the comparison runs RR regardless of the selected scheduler */}
+      <div className="flex items-center justify-between gap-4 pl-1">
+        <div className="flex flex-col">
+          <label htmlFor="rr-quantum" className="text-xs text-primary/70 uppercase font-bold tracking-widest">
+            RR Time Quantum
+          </label>
+          <span className="text-[10px] text-mtx2 italic mt-0.5">
+            {scheduler === 'RR' ? 'Ticks each process runs before preemption' : 'Used by Round Robin in the comparison'}
+          </span>
+        </div>
+        <input
+          id="rr-quantum"
+          type="number"
+          min={1}
+          step={1}
+          value={quantumText}
+          onChange={(e) => handleQuantumChange(e.target.value)}
+          onBlur={() => setQuantumText(String(quantum))}
+          className={cn(
+            "glass-input w-24 text-center font-mono text-mtx4 bg-[#12121e] border-white/10",
+            scheduler === 'RR' && "border-primary text-primary"
+          )}
+        />
       </div>
 
       {/* Presets */}
@@ -202,6 +246,7 @@ export default function InputPanel({ onSimulate, isSimulating }) {
                 <th className="px-4 py-3">Arrival</th>
                 <th className="px-4 py-3">Burst</th>
                 <th className="px-4 py-3">Priority</th>
+                <th className="px-4 py-3" title="Optional program / executable label. Jobs of the same program tend to have similar bursts; the Hybrid scheduler learns from them.">Program</th>
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>
@@ -229,8 +274,17 @@ export default function InputPanel({ onSimulate, isSimulating }) {
                     <input 
                       type="number" 
                       value={p.priority}
-                      onChange={(e) => updateProcess(i, 'priority', 1)}
+                      onChange={(e) => updateProcess(i, 'priority', e.target.value)}
                       className="w-16 bg-transparent border-none focus:ring-0 font-mono text-mtx5"
+                    />
+                  </td>
+                  <td className="px-3 py-3">
+                    <input
+                      type="text"
+                      value={p.program ?? ''}
+                      placeholder="—"
+                      onChange={(e) => updateProgram(i, e.target.value)}
+                      className="w-20 bg-transparent border-none focus:ring-0 font-mono text-mtx5 placeholder:text-mtx2"
                     />
                   </td>
                   <td className="px-1 py-3 ">
@@ -249,7 +303,7 @@ export default function InputPanel({ onSimulate, isSimulating }) {
       </div>
 
       <button
-        onClick={() => onSimulate({ scheduler, num_cores: cores, processes })}
+        onClick={() => onSimulate({ scheduler, num_cores: cores, quantum, processes })}
         disabled={isSimulating || processes.length === 0}
         className="btn-primary w-full h-14 flex items-center justify-center gap-2 group"
       >

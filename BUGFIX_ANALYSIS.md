@@ -132,3 +132,26 @@ Symmetric normalization: `remaining_time / max(pool_remaining)` instead of `/MAX
 ## 4. Architectural Note on Hybrid
 
 Hybrid *shares* `SchedulingEnv.select_process` and only augments state + reward inputs. If PPO fails to exploit the extra LSTM channel, Hybrid has no mechanism to beat PPO — it's strictly noisier. To make the hierarchy meaningful, the Hybrid policy should either (a) hard-gate: fall back to SRTF on predicted-burst when PPO's value estimate is low-confidence, or (b) use the LSTM prediction as an *action prior* via a KL penalty during PPO training. Right now it's effectively "PPO with one extra number", which is why it sometimes regresses below PPO alone.
+
+---
+
+## 5. Retraining (November 2026) — status of sections 3 and 4
+
+Sections 3 and 4 are resolved by a redesign rather than patches:
+
+- **Information model (realistic).** Agents never see true burst/remaining time. PPO sees only observable data (waiting time, CPU time used, age, running flag, stats of *finished* jobs). The Hybrid additionally gets an LSTM burst prediction made from finished jobs of the same `program` (new optional `Process.program` label). SJF/SRTF are reported as oracle bounds.
+- **Action = learned priority function** (`backend/rl/env.py`): one weight per process feature, top-`num_cores` scores run, selected processes keep their core. No index/fallback/final-sweep logic, no invalid actions.
+- **Reward** (`backend/rl/reward.py`): −jobs in system per tick (sums to −total turnaround, Little's law) − 0.05 per context switch. No tanh; reward normalised by `VecNormalize` in training only.
+- **Training** (`backend/rl/train_ppo.py`): fresh randomised workload every episode (`sample_training_workload`), validation-based checkpointing, CSV curves in `models/training_logs/`. Hyperparameters picked by a 2-core sweep (low exploration noise mattered most).
+- **LSTM** (`backend/ml/`): trained on same-program job histories, fixed `MAX_BURST` scaling shared with the env and API. Held-out MAE 5.79 ticks vs 6.47 (last burst) and 5.91 (window mean).
+
+**Held-out results** (10 seeds × 5 workload types, avg turnaround as a ratio to FCFS, lower is better; `results/*.csv`):
+
+| Cores | RR | MLFQ | PPO | Hybrid | SRTF (oracle) |
+|---|---|---|---|---|---|
+| 1 | 1.28 | 1.29 | 1.02 | **0.96** | 0.66 |
+| 2 | 1.26 | 1.29 | 1.01 | **0.93** | 0.68 |
+| 4 | 1.18 | 1.21 | 1.03 | **0.95** | 0.80 |
+| 8 | 1.07 | 1.07 | 1.00 | **0.99** | 0.95 |
+
+Hybrid beats FCFS, RR, MLFQ and PPO at every core count (paired t-tests in `results/summary.csv`). PPO without predictions is far better than RR/MLFQ but only matches FCFS, which is close to optimal for a non-clairvoyant scheduler on most of these workloads. Old models are kept in `models/archive_2026-11-21/` (incompatible with the new env).

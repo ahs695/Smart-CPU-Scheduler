@@ -25,6 +25,8 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
+from backend.paths import results_path
+
 # Lazy-import matplotlib so the module can be imported even without it
 try:
     import matplotlib
@@ -36,9 +38,9 @@ except ImportError:
     MATPLOTLIB_AVAILABLE = False
 
 # File paths
-BASELINES_CSV = "results/baselines.csv"
-RL_CSV        = "results/rl_results.csv"
-PLOTS_DIR     = "results/plots"
+BASELINES_CSV = results_path("baselines.csv")
+RL_CSV        = results_path("rl_results.csv")
+PLOTS_DIR     = results_path("plots")
 
 # Metric → display label mapping
 METRICS = {
@@ -48,18 +50,20 @@ METRICS = {
     "throughput":          "Throughput (processes / time unit)",
 }
 
-WORKLOAD_TYPES = ["cpu_heavy", "io_heavy", "mixed", "random"]
+from backend.experiments.workload_factory import WORKLOAD_TYPES
 
-# Consistent colour palette — ordered: FCFS, RR, MLFQ, PPO, Hybrid
+# Consistent colour palette — ordered: FCFS, RR, MLFQ, SJF, SRTF, PPO, Hybrid
 PALETTE = {
     "FCFS":   "#6c7a89",   # slate grey
+    "SJF":    "#95a5a6",   # light grey (oracle)
+    "SRTF":   "#34495e",   # dark slate (oracle)
     "RR":     "#3d9970",   # teal green
     "MLFQ":   "#2980b9",   # blue
     "PPO":    "#e67e22",   # amber
     "Hybrid": "#8e44ad",   # purple
 }
 
-ALGO_ORDER = ["FCFS", "RR", "MLFQ", "PPO", "Hybrid"]
+ALGO_ORDER = ["FCFS", "RR", "MLFQ", "SJF", "SRTF", "PPO", "Hybrid"]
 
 
 # ------------------------------------------------------------
@@ -226,6 +230,10 @@ def main():
         "--output", type=str, default=PLOTS_DIR,
         help=f"Output directory for plots (default: {PLOTS_DIR})"
     )
+    parser.add_argument(
+        "--cores", type=int, default=2,
+        help="Core count to plot when the CSVs hold several (default: 2)"
+    )
     args = parser.parse_args()
 
     print("=" * 55)
@@ -235,6 +243,9 @@ def main():
     baseline_rows = load_csv(args.baselines)
     rl_rows       = load_csv(args.rl)
     all_rows      = baseline_rows + rl_rows
+    if any("num_cores" in r for r in all_rows):
+        all_rows = [r for r in all_rows if int(float(r.get("num_cores", args.cores))) == args.cores]
+        args.output = os.path.join(args.output, f"{args.cores}c")
 
     print(f"  Loaded {len(baseline_rows)} baseline rows + {len(rl_rows)} RL rows")
     print(f"  Output dir: {args.output}")

@@ -7,16 +7,17 @@ All experiment scripts must use this module to guarantee that every
 scheduler is evaluated on identical inputs for a given (workload_type, run_id).
 """
 
-import random
-import numpy as np
 from typing import List
 
-from backend.simulator.workload_generator import WorkloadGenerator
-from backend.simulator.process import Process
+import numpy as np
 
+from backend.simulator.process import Process
+from backend.simulator.workload_generator import (
+    BURST_PATTERNS, build_processes, native_arrivals, sample_jobs,
+)
 
 # Supported workload type labels
-WORKLOAD_TYPES = ["cpu_heavy", "io_heavy", "mixed", "random"]
+WORKLOAD_TYPES = list(BURST_PATTERNS)
 
 
 def generate_workload(
@@ -27,34 +28,13 @@ def generate_workload(
     """
     Generate a reproducible list of Process objects.
 
-    The (workload_type, seed) pair always produces the same workload,
-    ensuring fair head-to-head comparison across all schedulers.
-
-    Args:
-        workload_type: One of 'cpu_heavy', 'io_heavy', 'mixed', 'random'
-        n_processes:   Number of processes to generate
-        seed:          RNG seed (use run_id as seed for reproducibility)
-
-    Returns:
-        A fresh list of Process objects (all runtime fields at default values).
+    The (workload_type, seed) pair always produces the same workload, so every
+    scheduler is compared on identical inputs. Each workload runs a few
+    programs with their own typical bursts (see workload_generator.sample_jobs).
     """
-    random.seed(seed)
-    np.random.seed(seed)
-
-    if workload_type == "cpu_heavy":
-        return WorkloadGenerator.cpu_bound(n_processes)
-
-    elif workload_type == "io_heavy":
-        return WorkloadGenerator.io_bound(n_processes)
-
-    elif workload_type == "mixed":
-        return WorkloadGenerator.mixed(n_processes)
-
-    elif workload_type == "random":
-        return WorkloadGenerator.random_workload(n_processes)
-
-    else:
-        raise ValueError(
-            f"Unknown workload_type '{workload_type}'. "
-            f"Choose from: {WORKLOAD_TYPES}"
-        )
+    if workload_type not in WORKLOAD_TYPES:
+        raise ValueError(f"Unknown workload_type '{workload_type}'. Choose from: {WORKLOAD_TYPES}")
+    rng = np.random.default_rng(seed)
+    bursts, programs = sample_jobs(workload_type, n_processes, rng)
+    arrivals = native_arrivals(workload_type, n_processes, rng)
+    return build_processes(arrivals, bursts, programs)

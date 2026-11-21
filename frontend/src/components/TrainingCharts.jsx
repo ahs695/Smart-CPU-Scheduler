@@ -1,114 +1,95 @@
 import React from 'react';
-import { 
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, 
-  ResponsiveContainer, AreaChart, Area, ScatterChart, Scatter, ZAxis 
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, ScatterChart, Scatter
 } from 'recharts';
 
-export function RewardCurve({ data }) {
+/**
+ * Real LSTM burst predictions vs ground truth, served by /lstm-predictions.
+ * evaluation: { status: 'loading' | 'ok' | 'unavailable', samples, mae, baseline_mae }
+ */
+export function LSTMPredictionChart({ evaluation }) {
+  const { status = 'loading', samples = [], mae, baseline_mae } = evaluation || {};
+  const hasData = status === 'ok' && samples.length > 0;
+
   return (
-    <div className="glass-card glass-card--inset-border p-6 h-[300px]">
-      <div className="flex items-center justify-between mb-6">
-        <h3 className="text-sm font-bold uppercase tracking-widest text-primary/80">RL Agent Learning Progress</h3>
-        <div className="flex gap-4">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-cyan-400" />
-            <span className="text-[10px] text-mtx4 uppercase font-bold">Total Reward</span>
-          </div>
-        </div>
+    <div className="glass-card glass-card--inset-border p-6 h-[320px]">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
+        <h3 className="text-sm font-bold uppercase tracking-widest text-secondary/80">LSTM Burst Prediction Accuracy</h3>
+        {hasData && (
+          <span className="text-[10px] font-mono text-mtx3">
+            MAE <span className="text-secondary font-bold">{mae.toFixed(2)}</span>
+            {' '}vs last-burst baseline <span className="text-mtx4 font-bold">{baseline_mae.toFixed(2)}</span> ticks
+            {' · '}{samples.length} held-out sequences
+          </span>
+        )}
       </div>
-      
-      <ResponsiveContainer width="100%" height="80%">
-        <AreaChart data={data}>
-          <defs>
-            <linearGradient id="colorReward" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.4}/>
-              <stop offset="95%" stopColor="#06b6d4" stopOpacity={0}/>
-            </linearGradient>
-          </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.08)" vertical={false} />
-          <XAxis 
-            dataKey="episode" 
-            stroke="#94a3b8" 
-            fontSize={10} 
-            tickLine={false} 
-            axisLine={false}
-            tick={{ fill: '#cbd5e1' }}
-            label={{ value: 'Training Episode', position: 'insideBottom', offset: -1, fill: '#e2e8f0', fontSize: 10, fontWeight: 'bold' }}
-          />
-          <YAxis 
-            stroke="#94a3b8" 
-            fontSize={10} 
-            tickLine={false} 
-            axisLine={false}
-            tick={{ fill: '#cbd5e1' }}
-            label={{ value: 'Total Reward', angle: -90, position: 'insideLeft', offset: 10, fill: '#e2e8f0', fontSize: 10, fontWeight: 'bold' }}
-          />
-          <Tooltip 
-            contentStyle={{ backgroundColor: '#12121e', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px', color: '#f1f5f9' }}
-            itemStyle={{ color: '#06b6d4', fontSize: '12px' }}
-          />
-          <Area 
-            type="monotone" 
-            dataKey="reward" 
-            stroke="#06b6d4" 
-            fillOpacity={1} 
-            fill="url(#colorReward)" 
-            strokeWidth={2}
-          />
-        </AreaChart>
-      </ResponsiveContainer>
+
+      {hasData ? (
+        <ResponsiveContainer width="100%" height="85%">
+          <ScatterChart>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.08)" vertical={false} />
+            <XAxis
+              dataKey="id"
+              name="Sample"
+              type="number"
+              stroke="#94a3b8"
+              fontSize={10}
+              tickLine={false}
+              axisLine={false}
+              tick={{ fill: '#cbd5e1' }}
+              label={{ value: 'Sample', position: 'insideBottom', offset: -1, fill: '#e2e8f0', fontSize: 10, fontWeight: 'bold' }}
+            />
+            <YAxis
+              stroke="#94a3b8"
+              fontSize={10}
+              tickLine={false}
+              axisLine={false}
+              tick={{ fill: '#cbd5e1' }}
+              label={{ value: 'Burst Length (ticks)', angle: -90, position: 'insideLeft', offset: 8, fill: '#e2e8f0', fontSize: 10, fontWeight: 'bold' }}
+            />
+            <Tooltip
+              cursor={{ strokeDasharray: '3 3' }}
+              formatter={(v) => (typeof v === 'number' ? v.toFixed(2) : v)}
+              contentStyle={{ backgroundColor: '#12121e', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px', color: '#f1f5f9' }}
+            />
+            <Scatter name="Actual" data={samples} fill="#3b82f6" shape="circle" dataKey="actual" />
+            <Scatter name="Predicted" data={samples} fill="#10b981" shape="cross" dataKey="predicted" />
+          </ScatterChart>
+        </ResponsiveContainer>
+      ) : (
+        <div className="flex flex-col items-center justify-center h-[80%] opacity-60">
+          <p className="text-sm font-medium text-mtx4">
+            {status === 'loading' ? 'Loading predictions…' : 'LSTM model not available'}
+          </p>
+          {status !== 'loading' && (
+            <p className="text-xs text-mtx3 italic mt-2">Train it with python -m backend.ml.train_lstm and restart the backend.</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-export function LSTMPredictionChart({ data }) {
-  return (
-    <div className="glass-card glass-card--inset-border p-6 h-[300px]">
-      <h3 className="text-sm font-bold uppercase tracking-widest text-secondary/80 mb-6">LSTM Burst Prediction Accuracy</h3>
-      
-      <ResponsiveContainer width="100%" height="90%">
-        <ScatterChart>
-          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.08)" vertical={false} />
-          <XAxis 
-            dataKey="id" 
-            name="Sample ID" 
-            stroke="#94a3b8" 
-            fontSize={10} 
-            tickLine={false} 
-            axisLine={false}
-            tick={{ fill: '#cbd5e1' }}
-            label={{ value: 'Sample ID', position: 'insideBottom', offset: -1, fill: '#e2e8f0', fontSize: 10, fontWeight: 'bold' }}
-          />
-          <YAxis 
-            stroke="#94a3b8" 
-            fontSize={10} 
-            tickLine={false} 
-            axisLine={false}
-            tick={{ fill: '#cbd5e1' }}
-            label={{ value: 'Burst Length (ms)', angle: -90, position: 'insideLeft', offset: 8, fill: '#e2e8f0', fontSize: 10, fontWeight: 'bold' }}
-          />
-          <Tooltip 
-            cursor={{ strokeDasharray: '3 3' }}
-            contentStyle={{ backgroundColor: '#12121e', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px', color: '#f1f5f9' }}
-          />
-          <Scatter name="Actual" data={data} fill="#3b82f6" shape="circle" dataKey="actual" />
-          <Scatter name="Predicted" data={data} fill="#10b981" shape="cross" dataKey="predicted" />
-        </ScatterChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
-
-export function ComparisonChart({ data }) {
+export function ComparisonChart({ data, numCores = 2, isLoading = false }) {
   const chartData = Array.isArray(data) ? data : [];
   
   if (chartData.length === 0) {
     return (
       <div className="glass-card glass-card--inset-border p-6 h-[400px]">
-        <h3 className="text-sm font-bold uppercase tracking-widest text-primary/80 mb-6">Architecture performance benchmark</h3>
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-sm font-bold uppercase tracking-widest text-primary/80">
+            Architecture performance benchmark ({numCores} {numCores === 1 ? 'Core' : 'Cores'})
+          </h3>
+          {isLoading && (
+            <span className="text-[10px] text-primary font-mono animate-pulse">Running comparison...</span>
+          )}
+        </div>
         <div className="flex flex-col items-center justify-center h-[80%] opacity-50">
-          <p className="text-sm font-medium text-mtx4">No Data Available</p>
-          <p className="text-xs text-mtx3 italic mt-2">Run a simulation to see performance comparisons here.</p>
+          <p className="text-sm font-medium text-mtx4">{isLoading ? 'Evaluating schedulers...' : 'No Data Available'}</p>
+          <p className="text-xs text-mtx3 italic mt-2">
+            {isLoading ? `Running all algorithms across ${numCores} cores.` : 'Comparison unavailable — check that the backend is running.'}
+          </p>
         </div>
       </div>
     );
@@ -117,7 +98,14 @@ export function ComparisonChart({ data }) {
   return (
     <div className="glass-card glass-card--inset-border p-6 h-[400px]">
       <div className="flex items-center justify-between mb-6">
-        <h3 className="text-sm font-bold uppercase tracking-widest text-primary/80">Architecture performance benchmark</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-bold uppercase tracking-widest text-primary/80">
+            Architecture performance benchmark ({numCores} {numCores === 1 ? 'Core' : 'Cores'})
+          </h3>
+          {isLoading && (
+            <span className="text-[10px] text-cyan-400 font-mono animate-pulse">updating...</span>
+          )}
+        </div>
         <div className="flex items-center gap-4 text-xs font-semibold">
           <div className="flex items-center gap-1.5 text-mtx3">
             <span className="inline-block w-3 h-0.5 border-t-2 border-dashed border-cyan-400"></span>

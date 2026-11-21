@@ -97,9 +97,18 @@ class MultiCoreSimulator:
         # 1️⃣ Check arrivals
         self._add_new_arrivals()
 
-        # 2️⃣ Update waiting times
-        for process in self.ready_queue:
-            process.update_waiting_time(self.time)
+        # 2️⃣ Update waiting times for every arrived, unfinished process that
+        # is not on a core. Don't rely on self.ready_queue alone: schedulers
+        # with private queues (e.g. MLFQ) drain it, which would freeze the
+        # waiting time of everything sitting in their internal queues.
+        running = {id(c.current_process) for c in self.cores if c.current_process}
+        for process in self.processes:
+            if (
+                process.arrival_time <= self.time
+                and not process.is_completed()
+                and id(process) not in running
+            ):
+                process.update_waiting_time(self.time)
 
         # 3️⃣ Scheduler decision
         decisions = self.scheduler.select_process(

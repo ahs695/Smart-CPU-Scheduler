@@ -73,13 +73,20 @@ class SJFScheduler(SchedulerBase):
 
         decisions: Dict[int, Optional[Process]] = {}
 
-        # Collect all runnable processes:
-        # ready queue + currently running processes
-        runnable_processes = ready_queue.copy()
-
+        # Collect all unique runnable processes:
+        # ready queue + currently running processes (deduplicated by PID)
+        seen_pids = set()
+        runnable_processes = []
+        for p in ready_queue:
+            if p.pid not in seen_pids and not p.is_completed():
+                seen_pids.add(p.pid)
+                runnable_processes.append(p)
         for core in cores:
             if core.current_process is not None:
-                runnable_processes.append(core.current_process)
+                p = core.current_process
+                if p.pid not in seen_pids and not p.is_completed():
+                    seen_pids.add(p.pid)
+                    runnable_processes.append(p)
 
         # Sort by remaining time (shortest remaining first)
         runnable_processes.sort(key=lambda p: p.remaining_time)
