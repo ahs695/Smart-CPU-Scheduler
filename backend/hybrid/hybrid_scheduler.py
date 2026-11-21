@@ -48,7 +48,7 @@ class HybridSchedulingEnv(SchedulingEnv):
         )
 
     def _extra_feature_names(self) -> List[str]:
-        return ["pred_burst", "pred_remaining", "log_pred_remaining", "pred_history"]
+        return ["pred_burst", "pred_remaining", "log_pred_remaining", "pred_history", "pred_laxity"]
 
     def _on_reset(self):
         self.process_predictions = {}     # id(process) -> (predicted burst, history length)
@@ -86,9 +86,15 @@ class HybridSchedulingEnv(SchedulingEnv):
         pred = np.array([self.process_predictions[id(p)][0] for p in procs], dtype=np.float32)
         hist = np.array([self.process_predictions[id(p)][1] for p in procs], dtype=np.float32)
         pred_remaining = np.maximum(pred - attained, 0.0)
+        # Predicted laxity: time to the deadline minus predicted remaining work (0 without a deadline)
+        laxity = np.array([
+            0.0 if p.deadline is None else (p.deadline - self._feature_time - r) / TIME_SCALE
+            for p, r in zip(procs, pred_remaining)
+        ], dtype=np.float32)
         return [
             pred / TIME_SCALE,
             pred_remaining / TIME_SCALE,
             np.log1p(pred_remaining) / LOG_SCALE,
             hist,
+            np.clip(laxity, -2.0, 2.0),
         ]

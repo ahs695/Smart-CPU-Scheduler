@@ -1,5 +1,5 @@
 import React from 'react';
-import { Clock, Activity, Zap, Cpu, ArrowRightLeft, ShieldCheck } from 'lucide-react';
+import { Clock, Activity, Zap, Cpu, ArrowRightLeft, ShieldCheck, AlarmClock, Hourglass } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 const METRIC_CONFIG = {
@@ -11,12 +11,20 @@ const METRIC_CONFIG = {
   cpu_utilization: { label: 'Utilization', icon: Cpu, color: 'text-cyan-400', unit: '%' }
 };
 
+// Shown only when the workload has deadlines (metrics.deadline_jobs > 0)
+const DEADLINE_CONFIG = {
+  deadline_miss_rate: { label: 'Deadline Misses', icon: AlarmClock, color: 'text-red-400', unit: '%' },
+  avg_lateness: { label: 'Avg Lateness', icon: Hourglass, color: 'text-rose-400', unit: 'ticks' },
+};
+
 export default function MetricsPanel({ metrics }) {
   if (!metrics) return null;
 
+  const config = metrics.deadline_jobs > 0 ? { ...METRIC_CONFIG, ...DEADLINE_CONFIG } : METRIC_CONFIG;
+
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-      {Object.entries(METRIC_CONFIG).map(([key, config], idx) => {
+      {Object.entries(config).map(([key, config], idx) => {
         let value = metrics[key];
         if (value === undefined || value === null) value = 0;
         
@@ -24,6 +32,8 @@ export default function MetricsPanel({ metrics }) {
         const displayValue = typeof value === 'number' 
           ? key === 'cpu_utilization'
             ? (value * 100).toFixed(3)
+            : key === 'deadline_miss_rate'
+            ? `${(value * 100).toFixed(1)}`
             : key === 'context_switches'
             ? Math.round(value).toString()
             : key === 'fairness_index' || key === 'throughput'
@@ -39,7 +49,7 @@ export default function MetricsPanel({ metrics }) {
             transition={{ delay: idx * 0.1 }}
             className="glass-card glass-card--inset-border p-4 relative overflow-hidden group hover:border-mtx2 transition-colors"
           >
-            <div className={`p-2 rounded-lg bg-mtx2 w-fit mb-3`}>
+            <div className={`p-2 rounded-lg bg-mtx1 w-fit mb-3`}>
               <config.icon size={18} />
             </div>
             
@@ -48,8 +58,11 @@ export default function MetricsPanel({ metrics }) {
             </div>
             
             <div className="flex items-baseline gap-1">
-              <span className="text-2xl font-mono font-bold text-mtx5">{displayValue}</span>
+              <span className={`text-2xl font-mono font-bold ${key === 'deadline_miss_rate' && value > 0 ? 'text-red-400' : 'text-mtx5'}`}>{displayValue}</span>
               <span className="text-[10px] text-mtx2 font-bold">{config.unit}</span>
+              {key === 'deadline_miss_rate' && (
+                <span className="text-[10px] text-mtx3 font-mono ml-1">({metrics.deadline_misses}/{metrics.deadline_jobs})</span>
+              )}
             </div>
 
             {/* Subtle graph background decoration */}

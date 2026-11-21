@@ -16,6 +16,13 @@ from backend.simulator.traditional.fcfs import FCFSScheduler
 from backend.simulator.traditional.sjf import SJFScheduler
 from backend.simulator.traditional.round_robin import RoundRobinScheduler
 from backend.simulator.traditional.mlfq import MLFQScheduler
+from backend.simulator.traditional.edf import EDFScheduler
+from backend.simulator.traditional.rms import RMSScheduler
+from backend.simulator.realtime import (
+    MAX_HORIZON, assign_deadlines, expand_periodic, hyperperiod, schedulability,
+    tasks_from_processes, validate_tasks,
+)
+from backend.experiments.trace_import import TraceFormatError, import_trace
 
 # RL / Hybrid
 from stable_baselines3 import PPO
@@ -27,6 +34,7 @@ from backend.ml.dataset import DatasetBuilder
 from backend.paths import LSTM_MODEL_PATH, ppo_model_candidates
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024   # trace uploads
 CORS(app)
 
 # --- Global Model Cache ---
@@ -70,7 +78,7 @@ load_models()
 
 # --- Helper Logic ---
 
-TRADITIONAL_SCHEDULERS = ["FCFS", "SJF", "RR", "MLFQ"]
+TRADITIONAL_SCHEDULERS = ["FCFS", "SJF", "RR", "MLFQ", "EDF", "RMS"]
 
 def get_scheduler(name, quantum=2):
     """Single source of truth for traditional schedulers, shared by
@@ -80,6 +88,8 @@ def get_scheduler(name, quantum=2):
     if name == "SJF": return SJFScheduler(preemptive=False)
     if name == "RR": return RoundRobinScheduler(quantum=quantum)
     if name == "MLFQ": return MLFQScheduler()
+    if name == "EDF": return EDFScheduler()
+    if name == "RMS": return RMSScheduler()
     return None
 
 def _parse_quantum(data):
@@ -144,7 +154,8 @@ def run_rl_sim(mode, processes, num_cores):
     return {
         "gantt_chart": sim.gantt_chart,
         "metrics": metrics,
-        "trace": trace
+        "trace": trace,
+        "deadline_events": MetricsEngine.deadline_events(sim.processes),
     }
 
 def run_traditional_sim(scheduler, processes, num_cores):
@@ -176,7 +187,8 @@ def run_traditional_sim(scheduler, processes, num_cores):
     return {
         "gantt_chart": sim.gantt_chart,
         "metrics": metrics,
-        "trace": trace
+        "trace": trace,
+        "deadline_events": MetricsEngine.deadline_events(sim.processes),
     }
 
 # --- Routes ---
@@ -220,7 +232,23 @@ def simulate():
     if not result:
         return jsonify({"error": "Simulation failed (check if models are loaded)"}), 500
 
+    # Periodic task set present: report utilisation vs the RMS / EDF bounds
+    tasks = tasks_from_processes(processes)
+    if tasks:
+        result["realtime"] = {**schedulability(tasks, num_cores), "tasks": tasks}
+
     return jsonify(result)
+
+def _opt_int(value):
+    """Optional integer field: None / "" -> None, else int (raises ValueError/TypeError)."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    return int(value)
+
+def _process_to_dict(p):
+    return {"pid": p.pid, "arrival": p.arrival_time, "burst": p.burst_time,
+            "priority": p.priority, "program": p.program or "",
+            "deadline": p.deadline, "period": p.period}
 
 def _parse_processes(process_data):
     """
@@ -235,8 +263,10 @@ def _parse_processes(process_data):
             arrival = int(p.get("arrival", p.get("arrival_time", 0)))
             burst = int(p.get("burst", p.get("burst_time", 5)))
             priority = int(p.get("priority", 0))
+            deadline = _opt_int(p.get("deadline"))
+            period = _opt_int(p.get("period"))
         except (TypeError, ValueError, AttributeError):
-            return None, f"process {i}: pid, arrival, burst and priority must be integers"
+            return None, f"process {i}: pid, arrival, burst, priority, deadline and period must be integers"
         # Optional program / executable label (any string or number); blank = unknown
         # (normalised to a string so 3 and "3" are the same program)
         program = p.get("program")
@@ -248,7 +278,12 @@ def _parse_processes(process_data):
             return None, f"process P{pid}: burst must be >= 1"
         if arrival < 0:
             return None, f"process P{pid}: arrival must be >= 0"
-        processes.append(Process(pid=pid, arrival_time=arrival, burst_time=burst, priority=priority, program=program))
+        if deadline is not None and deadline <= arrival:
+            return None, f"process P{pid}: deadline must be after its arrival"
+        if period is not None and period < 1:
+            return None, f"process P{pid}: period must be >= 1"
+        processes.append(Process(pid=pid, arrival_time=arrival, burst_time=burst, priority=priority,
+                                 program=program, deadline=deadline, period=period))
     return processes, None
 
 def _safe_metrics(runner):
@@ -302,6 +337,81 @@ def compare():
             "total_burst": sum(p.burst_time for p in processes),
         },
     })
+
+# --- Real-time workloads & trace import ---
+
+@app.route("/workload/periodic", methods=["POST"])
+def periodic_workload():
+    """
+    Expand a periodic task set into jobs.
+    Body: {"tasks": [{"name", "period", "wcet", "phase"?}], "horizon"?: int, "num_cores"?: int}
+    The default horizon is two hyperperiods (capped).
+    """
+    data = request.get_json(silent=True) or {}
+    tasks = data.get("tasks") or []
+    error = validate_tasks(tasks)
+    if error:
+        return jsonify({"error": error}), 400
+    try:
+        num_cores = int(data.get("num_cores", 1))
+        horizon = _opt_int(data.get("horizon")) or min(2 * hyperperiod(tasks), MAX_HORIZON)
+    except (TypeError, ValueError):
+        return jsonify({"error": "horizon and num_cores must be integers"}), 400
+    if not 1 <= horizon <= MAX_HORIZON:
+        return jsonify({"error": f"horizon must be between 1 and {MAX_HORIZON}"}), 400
+    processes = expand_periodic(tasks, horizon)
+    return jsonify({
+        "processes": [_process_to_dict(p) for p in processes],
+        "horizon": horizon,
+        **schedulability(tasks, max(num_cores, 1)),
+    })
+
+@app.route("/workload/deadlines", methods=["POST"])
+def add_deadlines():
+    """Body: {"processes": [...], "slack": float} -> processes, each given deadline = arrival + ceil(burst*slack) if missing."""
+    data = request.get_json(silent=True) or {}
+    processes, error = _parse_processes(data.get("processes"))
+    if error:
+        return jsonify({"error": error}), 400
+    try:
+        slack = float(data.get("slack", 3.0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "slack must be a number"}), 400
+    if not 1.0 <= slack <= 100:
+        return jsonify({"error": "slack must be between 1 and 100"}), 400
+    assign_deadlines(processes, slack)
+    return jsonify({"processes": [_process_to_dict(p) for p in processes]})
+
+@app.route("/import-trace", methods=["POST"])
+def import_trace_route():
+    """
+    Multipart upload of a Google 2011 task_events or Alibaba 2018 batch_task CSV.
+    Form fields: format (auto|google|alibaba), max_jobs (default 60), offset,
+    slack (optional deadlines), load + num_cores (optional arrival compression).
+    """
+    upload = request.files.get("file")
+    if upload is None:
+        return jsonify({"error": "no file uploaded (form field 'file')"}), 400
+    form = request.form
+    try:
+        max_jobs = int(form.get("max_jobs", 60))
+        offset = int(form.get("offset", 0))
+        num_cores = int(form.get("num_cores", 1))
+        slack = float(form["slack"]) if form.get("slack") else None
+        load = float(form["load"]) if form.get("load") else None
+    except ValueError:
+        return jsonify({"error": "max_jobs, offset, num_cores must be integers; slack and load numbers"}), 400
+    if not 1 <= max_jobs <= 400 or offset < 0:
+        return jsonify({"error": "max_jobs must be 1-400 and offset >= 0"}), 400
+    try:
+        text = upload.read().decode("utf-8", errors="replace")
+        processes, fmt, stats = import_trace(
+            text, form.get("format", "auto"), max_jobs=max_jobs, offset=offset,
+            load=load, num_cores=num_cores, slack=slack,
+        )
+    except TraceFormatError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"processes": [_process_to_dict(p) for p in processes], "format": fmt, "stats": stats})
 
 LSTM_EVAL_SAMPLES = 50      # points plotted
 LSTM_EVAL_WORKLOADS = 200   # held-out workloads the MAE is computed on

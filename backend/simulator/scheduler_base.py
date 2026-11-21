@@ -88,3 +88,34 @@ class SchedulerBase(ABC):
         Important for reproducibility in experiments.
         """
         pass
+
+# ------------------------------------------------------------
+# Shared helpers for priority-based (top-N) schedulers
+# ------------------------------------------------------------
+
+def runnable_processes(ready_queue: List[Process], cores: List[Core]) -> List[Process]:
+    """Running processes plus ready ones, without duplicates or finished processes."""
+    running = [c.current_process for c in cores if c.current_process is not None]
+    running_ids = {id(p) for p in running}
+    return running + [p for p in ready_queue if id(p) not in running_ids and not p.is_completed()]
+
+
+def assign_keeping_cores(selected: List[Process], cores: List[Core]) -> Dict[int, Optional[Process]]:
+    """
+    Map the processes chosen to run onto cores. A selected process that is
+    already running keeps its core (no needless migration or context switch);
+    newcomers fill idle cores first, then cores whose process was preempted.
+    """
+    decisions = {core.core_id: core.current_process for core in cores}
+    selected_ids = {id(p) for p in selected}
+    running_ids = {id(c.current_process) for c in cores if c.current_process is not None}
+
+    free_cores = [
+        core for core in cores
+        if core.current_process is None or id(core.current_process) not in selected_ids
+    ]
+    newcomers = [p for p in selected if id(p) not in running_ids]
+    free_cores.sort(key=lambda c: c.current_process is not None)
+    for core in free_cores:
+        decisions[core.core_id] = newcomers.pop(0) if newcomers else None
+    return decisions

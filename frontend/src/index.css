@@ -1,40 +1,107 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: #0a0a0f;
-  --color-bg: #0a0a0f;
-  --color-card: rgba(15, 15, 25, 0.8);
-  --color-card-solid: #0f0f19;
-  --color-primary: #06b6d4;
-  --color-secondary: #8b5cf6;
-  --color-accent: #10b981;
-  --color-rose: #f43f5e;
-  --color-text: #e2e8f0;
-  --color-text-muted: #64748b;
-  --color-border: rgba(255, 255, 255, 0.06);
+  /* Theme-dependent colours are defined once below on :root (dark) and
+     re-defined for [data-theme="light"]; Tailwind utilities read them. */
+  --color-background: var(--th-background);
+  --color-bg: var(--th-background);
+  --color-card: var(--th-card);
+  --color-card-solid: var(--th-card-solid);
+  --color-field: var(--th-field);
+  --color-ink: var(--th-ink);
+  --color-primary: var(--th-primary);
+  --color-secondary: var(--th-secondary);
+  --color-accent: var(--th-accent);
+  --color-rose: var(--th-rose);
+  --color-text: var(--th-text);
+  --color-text-muted: var(--th-text-muted);
+  --color-border: var(--th-border);
 
-  --mtx1: rgba(255, 255, 255, 0.06);
-  --mtx2: #94a3b8;
-  --mtx3: #cbd5e1;
-  --mtx4: #e2e8f0;
-  --mtx5: #f1f5f9;
+  /* Text / line scale, faint → strong */
+  --color-mtx1: var(--th-mtx1);
+  --color-mtx2: var(--th-mtx2);
+  --color-mtx3: var(--th-mtx3);
+  --color-mtx4: var(--th-mtx4);
+  --color-mtx5: var(--th-mtx5);
 
   --font-sans: "Inter", "system-ui", "sans-serif";
+}
 
-  --accent: #06b6d4;
-  --accent-bg: rgba(6, 182, 212, 0.1);
-  --accent-border: #0891b2;
+/* ── Dark palette (default) ─────────────────────── */
+:root {
+  color-scheme: dark;
+  --th-background: #0a0a0f;
+  --th-card: rgba(15, 15, 25, 0.8);
+  --th-card-solid: #0f0f19;
+  --th-field: #12121e;
+  --th-ink: #ffffff;            /* overlay tint: bg-ink/5 = faint highlight */
+  --th-primary: #06b6d4;
+  --th-secondary: #8b5cf6;
+  --th-accent: #10b981;
+  --th-rose: #f43f5e;
+  --th-text: #e2e8f0;
+  --th-text-muted: #64748b;
+  --th-border: rgba(255, 255, 255, 0.06);
+  --th-mtx1: rgba(255, 255, 255, 0.06);
+  --th-mtx2: #94a3b8;
+  --th-mtx3: #cbd5e1;
+  --th-mtx4: #e2e8f0;
+  --th-mtx5: #f1f5f9;
 
-  --text-h: #f1f5f9;
-  --border: rgba(255, 255, 255, 0.06);
-  --social-bg: rgba(6, 182, 212, 0.05);
+  --th-card-border: rgba(255, 255, 255, 0.06);
+  --th-card-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  --th-inset-border: rgba(255, 255, 255, 0.08);
+  --th-input-border: rgba(255, 255, 255, 0.1);
+  --th-scroll-track: rgba(255, 255, 255, 0.02);
+  --th-gantt-line: rgba(255, 255, 255, 0.05);
+}
 
-  --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+/* ── Light palette ──────────────────────────────── */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --th-background: #f4f6fb;
+  --th-card: rgba(255, 255, 255, 0.86);
+  --th-card-solid: #ffffff;
+  --th-field: #ffffff;
+  --th-ink: #0f172a;
+  /* Accents one step darker so text keeps >= 4.5:1 contrast on white */
+  --th-primary: #0e7490;
+  --th-secondary: #7c3aed;
+  --th-accent: #047857;
+  --th-rose: #e11d48;
+  --th-text: #1e293b;
+  --th-text-muted: #64748b;
+  --th-border: rgba(15, 23, 42, 0.08);
+  --th-mtx1: rgba(15, 23, 42, 0.07);
+  --th-mtx2: #64748b;
+  --th-mtx3: #475569;
+  --th-mtx4: #1e293b;
+  --th-mtx5: #0f172a;
+
+  --th-card-border: rgba(15, 23, 42, 0.08);
+  --th-card-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -8px rgba(15, 23, 42, 0.12);
+  --th-inset-border: rgba(15, 23, 42, 0.07);
+  --th-input-border: rgba(15, 23, 42, 0.15);
+  --th-scroll-track: rgba(15, 23, 42, 0.04);
+  --th-gantt-line: rgba(15, 23, 42, 0.06);
+
+  /* Status colours: the -300/-400 shades used for text on dark cards are
+     too pale on white, so in light mode they resolve to -600/-700. */
+  --color-red-300: #b91c1c;
+  --color-red-400: #dc2626;
+  --color-rose-400: #e11d48;
+  --color-emerald-400: #059669;
+  --color-yellow-400: #b45309;
+  --color-orange-400: #ea580c;
+  --color-cyan-400: #0891b2;
+  --color-blue-400: #2563eb;
+  --color-purple-400: #9333ea;
 }
 
 @layer base {
   body {
     @apply bg-background text-text antialiased selection:bg-primary/30;
+    transition: background-color 0.25s ease, color 0.25s ease;
   }
 
   /* Scrollbar styling */
@@ -43,24 +110,25 @@
     height: 6px;
   }
   ::-webkit-scrollbar-track {
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--th-scroll-track);
     border-radius: 3px;
   }
   ::-webkit-scrollbar-thumb {
-    background: rgba(6, 182, 212, 0.3);
+    background: color-mix(in oklab, var(--th-primary) 30%, transparent);
     border-radius: 3px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(6, 182, 212, 0.5);
+    background: color-mix(in oklab, var(--th-primary) 50%, transparent);
   }
 }
 
 @layer components {
   /* ── Glass Card ─────────────────────────────────── */
   .glass-card {
-    @apply relative backdrop-blur-xl rounded-2xl shadow-2xl overflow-hidden;
-    background: rgba(15, 15, 25, 0.8);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    @apply relative backdrop-blur-xl rounded-2xl overflow-hidden;
+    background: var(--th-card);
+    border: 1px solid var(--th-card-border);
+    box-shadow: var(--th-card-shadow);
   }
 
   .glass-card::before {
@@ -87,7 +155,7 @@
     position: absolute;
     inset: 1px;
     border-radius: inherit;
-    border: 1px dashed rgba(255, 255, 255, 0.08);
+    border: 1px dashed var(--th-inset-border);
     pointer-events: none;
   }
 
@@ -115,19 +183,20 @@
   /* ── Glass Input ────────────────────────────────── */
   .glass-input {
     @apply w-full px-4 py-2 rounded-lg outline-none transition-all font-medium appearance-none;
-    background-color: #12121e;
-    color: #e2e8f0;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background-color: var(--th-field);
+    color: var(--th-mtx4);
+    border: 1px solid var(--th-input-border);
   }
 
   .glass-input:focus {
-    border-color: rgba(6, 182, 212, 0.5);
-    box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.2), 0 0 20px rgba(6, 182, 212, 0.1);
+    border-color: color-mix(in oklab, var(--th-primary) 50%, transparent);
+    box-shadow: 0 0 0 2px color-mix(in oklab, var(--th-primary) 20%, transparent),
+      0 0 20px color-mix(in oklab, var(--th-primary) 10%, transparent);
   }
 
   .glass-input option {
-    background-color: #12121e;
-    color: #e2e8f0;
+    background-color: var(--th-field);
+    color: var(--th-mtx4);
   }
 
   /* ── Primary Button ─────────────────────────────── */
@@ -142,6 +211,11 @@
   .btn-primary:hover {
     filter: brightness(1.15);
     box-shadow: 0 4px 20px rgba(6, 182, 212, 0.4), 0 0 40px rgba(139, 92, 246, 0.25);
+  }
+
+  :root[data-theme="light"] .btn-primary {
+    background: linear-gradient(135deg, #0891b2, #7c3aed);
+    box-shadow: 0 4px 14px rgba(8, 145, 178, 0.25);
   }
 
   /* ── Neon Glow Utility ──────────────────────────── */
@@ -160,6 +234,11 @@
   .neon-glow-emerald {
     box-shadow: 0 0 15px rgba(16, 185, 129, 0.3), 0 0 30px rgba(16, 185, 129, 0.1);
   }
+}
+
+/* Neon glows read as smudges on a light background: soften them */
+:root[data-theme="light"] [class*="shadow-[0_0_"] {
+  --tw-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
 }
 
 /* ── Keyframes ──────────────────────────────────── */
@@ -193,7 +272,7 @@
 /* ── Gantt Styles ───────────────────────────────── */
 .gantt-row {
   @apply relative h-12 w-full;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid var(--th-gantt-line);
 }
 
 .gantt-block {

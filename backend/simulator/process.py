@@ -18,6 +18,10 @@ class Process:
     # Optional observable job identity (executable / user). Jobs of the same
     # program have similar bursts; the Hybrid's LSTM predicts from that history.
     program: Optional[object] = None
+    # Real-time extensions: absolute completion deadline (tick) and, for jobs
+    # released by a periodic task, that task's period (used by RMS).
+    deadline: Optional[int] = None
+    period: Optional[int] = None
 
     # Runtime fields (initialized later)
     remaining_time: int = field(init=False)

@@ -1,12 +1,15 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import axios from 'axios';
+import { motion, AnimatePresence } from 'framer-motion';
 import { schedulerService } from '../services/api';
 import InputPanel from './InputPanel';
 import GanttChart from './GanttChart';
+import SLAAlerts from './SLAAlerts';
 import '../App.css';
 import MetricsPanel from './MetricsPanel';
 import { LSTMPredictionChart, ComparisonChart } from './TrainingCharts';
-import { Activity, BarChart3, Info, AlertCircle, Cpu, Sparkles } from 'lucide-react';
+import { Activity, BarChart3, Info, AlertCircle, Cpu, Sparkles, Sun, Moon } from 'lucide-react';
+import { useTheme } from '../lib/theme';
 
 // Wait this long after the last workload/cores/quantum edit before re-running /compare
 const COMPARE_DEBOUNCE_MS = 400;
@@ -22,6 +25,10 @@ export default function Dashboard() {
   const [backendStatus, setBackendStatus] = useState('loading');
   const [error, setError] = useState(null);
   const [lastSimConfig, setLastSimConfig] = useState(null);
+  // Bumped per run: remounts the Gantt chart so playback (and SLA alerts) restart
+  const [runId, setRunId] = useState(0);
+  const [playbackTime, setPlaybackTime] = useState(-1);
+  const { theme, toggle: toggleTheme } = useTheme();
 
   const compareTimerRef = useRef(null);
   const compareAbortRef = useRef(null);
@@ -49,6 +56,7 @@ export default function Dashboard() {
             waiting:    v.metrics.avg_waiting_time    ?? 0,
             turnaround: v.metrics.avg_turnaround_time ?? 0,
             fairness:   v.metrics.fairness_index      ?? 0,
+            missRate:   v.metrics.deadline_miss_rate,     // null when no deadlines
           }));
         setComparisonData(arr);
         setCompareCores(config.num_cores);
@@ -98,6 +106,8 @@ export default function Dashboard() {
     try {
       const response = await schedulerService.simulate(config);
       setSimulationData(response.data);
+      setRunId((r) => r + 1);
+      setPlaybackTime(-1);
       setLastSimConfig(config);
     } catch (err) {
       setError(err.response?.data?.error || "Simulation failed. Please check if the backend is running.");
@@ -106,6 +116,16 @@ export default function Dashboard() {
       setIsSimulating(false);
     }
   };
+
+  // pid -> deadline, and the pids that missed, for the Gantt chart
+  const deadlineInfo = useMemo(() => {
+    const events = simulationData?.deadline_events || [];
+    return {
+      deadlines: Object.fromEntries(events.map((e) => [e.pid, e.deadline])),
+      missed: new Set(events.filter((e) => e.missed).map((e) => e.pid)),
+    };
+  }, [simulationData]);
+  const hasDeadlines = comparisonData.some((d) => d.missRate != null);
 
   return (
     <div className="min-h-screen p-4 md:p-8 flex flex-col gap-8 max-w-[1600px] mx-auto relative">
@@ -139,6 +159,27 @@ export default function Dashboard() {
             }`} />
             Backend {backendStatus}
           </div>
+          <button
+            type="button"
+            onClick={toggleTheme}
+            aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+            title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+            data-testid="theme-toggle"
+            className="relative w-10 h-10 grid place-items-center rounded-full border border-mtx1 bg-card backdrop-blur-sm text-mtx3 hover:text-primary hover:border-primary/40 transition-colors overflow-hidden"
+          >
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.span
+                key={theme}
+                initial={{ rotate: -90, opacity: 0, scale: 0.6 }}
+                animate={{ rotate: 0, opacity: 1, scale: 1 }}
+                exit={{ rotate: 90, opacity: 0, scale: 0.6 }}
+                transition={{ duration: 0.2 }}
+                className="grid place-items-center"
+              >
+                {theme === 'light' ? <Moon size={17} /> : <Sun size={17} />}
+              </motion.span>
+            </AnimatePresence>
+          </button>
         </div>
       </header>
 
@@ -197,26 +238,39 @@ export default function Dashboard() {
             
             {simulationData ? (
               <div className="flex flex-col gap-6">
-                <GanttChart 
-                  trace={simulationData.trace} 
+                <GanttChart
+                  key={runId}
+                  trace={simulationData.trace}
                   numCores={simulationData.trace[0].cores.length}
+                  onTimeChange={setPlaybackTime}
+                  deadlines={deadlineInfo.deadlines}
+                  missedPids={deadlineInfo.missed}
+                />
+                <SLAAlerts
+                  events={simulationData.deadline_events}
+                  currentTime={playbackTime}
+                  traceLength={simulationData.trace.length}
+                  realtime={simulationData.realtime}
                 />
                 <MetricsPanel metrics={simulationData.metrics} />
                 
                 <div className="flex flex-col gap-4 mt-2">
-                    <div className="overflow-hidden glass-card--inset-border glass-card p-6 border border-white/[0.06] rounded-xl">
+                    <div className="overflow-hidden glass-card--inset-border glass-card p-6 border border-ink/[0.06] rounded-xl">
                       <table className="w-full text-left text-sm whitespace-nowrap">
                         <thead>
-                          <tr className="border-b border-white/[0.08] text-mtx2">
+                          <tr className="border-b border-ink/[0.08] text-mtx2">
                             <th className="pb-3 px-4 font-medium uppercase tracking-wider text-xs">Algorithm</th>
                             <th className="pb-3 px-4 font-medium uppercase tracking-wider text-xs text-right">Avg Waiting</th>
                             <th className="pb-3 px-4 font-medium uppercase tracking-wider text-xs text-right">Avg Turnaround</th>
                             <th className="pb-3 px-4 font-medium uppercase tracking-wider text-xs text-center">Fairness Index</th>
+                            {hasDeadlines && (
+                              <th className="pb-3 px-4 font-medium uppercase tracking-wider text-xs text-right">Deadline Miss</th>
+                            )}
                           </tr>
                         </thead>
                         <tbody>
                           {comparisonData.map((data) => (
-                            <tr key={data.name} className="border-b border-white/[0.04] hover:bg-white/[0.03] transition-colors">
+                            <tr key={data.name} className="border-b border-ink/[0.04] hover:bg-ink/[0.03] transition-colors">
                               <td className="py-4 px-4 font-bold text-primary">{data.name}</td>
                               <td className="py-4 px-4 text-right font-mono text-mtx4">{data.waiting.toFixed(1)}</td>
                               <td className="py-4 px-4 text-right font-mono text-mtx4">{data.turnaround.toFixed(1)}</td>
@@ -229,6 +283,11 @@ export default function Dashboard() {
                                   {data.fairness.toFixed(2)}
                                 </span>
                               </td>
+                              {hasDeadlines && (
+                                <td className={`py-4 px-4 text-right font-mono ${data.missRate > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                                  {data.missRate == null ? '—' : `${(data.missRate * 100).toFixed(1)}%`}
+                                </td>
+                              )}
                             </tr>
                           ))}
                         </tbody>
@@ -237,7 +296,7 @@ export default function Dashboard() {
                 </div>
               </div>
             ) : (
-              <div className="h-[400px] glass-card--inset-border glass-card flex flex-col items-center justify-center border-dashed border-white/[0.08] opacity-60">
+              <div className="h-[400px] glass-card--inset-border glass-card flex flex-col items-center justify-center border-dashed border-ink/[0.08] opacity-60">
                 <Cpu size={40} className="text-primary/30 mb-4" />
                 <p className="text-sm font-medium text-mtx3">Ready to Simulate</p>
                 <p className="text-xs text-mtx2 italic mt-1">Define workload inputs on the left to begin.</p>
@@ -251,7 +310,7 @@ export default function Dashboard() {
 
   {/* HOW TO USE GUIDE */}
   <div className="glass-card glass-card--inset-border p-6 flex flex-col gap-4">
-    <div className="flex items-center gap-3 border-b border-white/[0.06] pb-3">
+    <div className="flex items-center gap-3 border-b border-ink/[0.06] pb-3">
       <Info className="text-primary" size={18} />
       <h3 className="text-sm font-bold uppercase tracking-widest text-primary/80">How to Use</h3>
     </div>
@@ -299,6 +358,15 @@ export default function Dashboard() {
         <div>
           <h4 className="text-sm font-bold text-mtx4">Compare All Algorithms</h4>
           <p className="mt-1">The benchmark chart (under Simulation Control) and the comparison table re-run every scheduler whenever you change the workload, cores or quantum — use them to justify algorithm choice for your workload type.</p>
+        </div>
+      </div>
+      <div className="flex gap-3">
+        <div className="w-8 h-8 rounded-full bg-rose/10 border border-rose/20 flex items-center justify-center shrink-0">
+          <span className="text-xs font-bold text-rose">06</span>
+        </div>
+        <div>
+          <h4 className="text-sm font-bold text-mtx4">Deadlines &amp; SLA Alerts</h4>
+          <p className="mt-1">Load an <span className="text-rose font-semibold">RT</span> preset (periodic tasks), press <span className="font-semibold text-mtx4">Auto Deadlines</span>, type deadlines, or import a Google / Alibaba cluster trace. Run <span className="text-rose font-semibold">EDF</span> or <span className="text-rose font-semibold">RMS</span> and play the Gantt chart: each missed deadline raises an alert as it happens, and missed jobs get a red outline. Try <span className="font-semibold text-mtx4">RT Overloaded</span> on 1 core: EDF meets every deadline, RMS does not.</p>
         </div>
       </div>
     </div>

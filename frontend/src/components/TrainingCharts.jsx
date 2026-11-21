@@ -3,6 +3,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ScatterChart, Scatter
 } from 'recharts';
+import { useChartColors } from '../lib/theme';
 
 /**
  * Real LSTM burst predictions vs ground truth, served by /lstm-predictions.
@@ -11,6 +12,7 @@ import {
 export function LSTMPredictionChart({ evaluation }) {
   const { status = 'loading', samples = [], mae, baseline_mae } = evaluation || {};
   const hasData = status === 'ok' && samples.length > 0;
+  const c = useChartColors();
 
   return (
     <div className="glass-card glass-card--inset-border p-6 h-[320px]">
@@ -28,33 +30,33 @@ export function LSTMPredictionChart({ evaluation }) {
       {hasData ? (
         <ResponsiveContainer width="100%" height="85%">
           <ScatterChart>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.08)" vertical={false} />
+            <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
             <XAxis
               dataKey="id"
               name="Sample"
               type="number"
-              stroke="#94a3b8"
+              stroke={c.axis}
               fontSize={10}
               tickLine={false}
               axisLine={false}
-              tick={{ fill: '#cbd5e1' }}
-              label={{ value: 'Sample', position: 'insideBottom', offset: -1, fill: '#e2e8f0', fontSize: 10, fontWeight: 'bold' }}
+              tick={{ fill: c.tick }}
+              label={{ value: 'Sample', position: 'insideBottom', offset: -1, fill: c.label, fontSize: 10, fontWeight: 'bold' }}
             />
             <YAxis
-              stroke="#94a3b8"
+              stroke={c.axis}
               fontSize={10}
               tickLine={false}
               axisLine={false}
-              tick={{ fill: '#cbd5e1' }}
-              label={{ value: 'Burst Length (ticks)', angle: -90, position: 'insideLeft', offset: 8, fill: '#e2e8f0', fontSize: 10, fontWeight: 'bold' }}
+              tick={{ fill: c.tick }}
+              label={{ value: 'Burst Length (ticks)', angle: -90, position: 'insideLeft', offset: 8, fill: c.label, fontSize: 10, fontWeight: 'bold' }}
             />
             <Tooltip
               cursor={{ strokeDasharray: '3 3' }}
               formatter={(v) => (typeof v === 'number' ? v.toFixed(2) : v)}
-              contentStyle={{ backgroundColor: '#12121e', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px', color: '#f1f5f9' }}
+              contentStyle={c.tooltip}
             />
-            <Scatter name="Actual" data={samples} fill="#3b82f6" shape="circle" dataKey="actual" />
-            <Scatter name="Predicted" data={samples} fill="#10b981" shape="cross" dataKey="predicted" />
+            <Scatter name="Actual" data={samples} fill={c.actual} shape="circle" dataKey="actual" />
+            <Scatter name="Predicted" data={samples} fill={c.predicted} shape="cross" dataKey="predicted" />
           </ScatterChart>
         </ResponsiveContainer>
       ) : (
@@ -73,6 +75,7 @@ export function LSTMPredictionChart({ evaluation }) {
 
 export function ComparisonChart({ data, numCores = 2, isLoading = false }) {
   const chartData = Array.isArray(data) ? data : [];
+  const c = useChartColors();
   
   if (chartData.length === 0) {
     return (
@@ -108,11 +111,11 @@ export function ComparisonChart({ data, numCores = 2, isLoading = false }) {
         </div>
         <div className="flex items-center gap-4 text-xs font-semibold">
           <div className="flex items-center gap-1.5 text-mtx3">
-            <span className="inline-block w-3 h-0.5 border-t-2 border-dashed border-cyan-400"></span>
+            <span className="inline-block w-3 h-0.5 border-t-2 border-dashed" style={{ borderColor: c.waiting }}></span>
             <span>Wait Time</span>
           </div>
           <div className="flex items-center gap-1.5 text-mtx3">
-            <span className="inline-block w-3 h-0.5 bg-violet-400"></span>
+            <span className="inline-block w-3 h-0.5 " style={{ backgroundColor: c.turnaround }}></span>
             <span>Turnaround</span>
           </div>
         </div>
@@ -120,29 +123,30 @@ export function ComparisonChart({ data, numCores = 2, isLoading = false }) {
       
       <ResponsiveContainer width="100%" height="80%">
         <LineChart data={chartData}>
-          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.08)" vertical={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
           <XAxis 
             dataKey="name" 
-            stroke="#94a3b8" 
+            stroke={c.axis} 
             fontSize={10} 
             tickLine={false} 
             axisLine={false}
-            tick={{ fill: '#cbd5e1' }}
-            label={{ value: 'Scheduling Algorithm', position: 'insideBottom', offset: -1, fill: '#e2e8f0', fontSize: 10, fontWeight: 'bold' }}
+            tick={{ fill: c.tick }}
+            label={{ value: 'Scheduling Algorithm', position: 'insideBottom', offset: -1, fill: c.label, fontSize: 10, fontWeight: 'bold' }}
           />
           <YAxis 
-            stroke="#94a3b8" 
+            stroke={c.axis} 
             fontSize={10} 
             tickLine={false} 
             axisLine={false}
-            tick={{ fill: '#cbd5e1' }}
-            label={{ value: 'Time (ms)', angle: -90, position: 'insideLeft', offset: 10, fill: '#e2e8f0', fontSize: 10, fontWeight: 'bold' }}
+            tick={{ fill: c.tick }}
+            label={{ value: 'Time (ms)', angle: -90, position: 'insideLeft', offset: 10, fill: c.label, fontSize: 10, fontWeight: 'bold' }}
           />
           <Tooltip 
-            contentStyle={{ backgroundColor: '#12121e', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px', color: '#f1f5f9' }}
+            cursor={{ stroke: c.axis, strokeDasharray: '3 3' }}
+            contentStyle={c.tooltip}
           />
-          <Line type="monotone" dataKey="waiting" stroke="#06b6d4" strokeWidth={3} dot={{ r: 4, fill: '#06b6d4' }} strokeDasharray="5 5" name="Wait Time" />
-          <Line type="monotone" dataKey="turnaround" stroke="#8b5cf6" strokeWidth={3} dot={{ r: 4, fill: '#8b5cf6' }} name="Turnaround" />
+          <Line type="monotone" dataKey="waiting" stroke={c.waiting} strokeWidth={3} dot={{ r: 4, fill: c.waiting }} strokeDasharray="5 5" name="Wait Time" />
+          <Line type="monotone" dataKey="turnaround" stroke={c.turnaround} strokeWidth={3} dot={{ r: 4, fill: c.turnaround }} name="Turnaround" />
         </LineChart>
       </ResponsiveContainer>
     </div>

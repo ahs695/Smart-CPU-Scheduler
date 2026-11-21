@@ -153,4 +153,50 @@ class MetricsEngine:
             "completed_processes": len(turnaround),
             "total_processes": len(processes),
             "total_time": total_time,
+            **MetricsEngine.deadline_metrics(processes),
+        }
+
+    # ------------------------------------------------------------
+    # Real-time / SLA metrics
+    # ------------------------------------------------------------
+
+    @staticmethod
+    def deadline_events(processes: List[Process]) -> List[Dict]:
+        """
+        One record per process that has a deadline. A process that never
+        completed counts as missed. `time` is the tick at which a miss becomes
+        certain (the deadline itself) — used to raise SLA alerts in time order.
+        """
+        events = []
+        for p in processes:
+            if p.deadline is None:
+                continue
+            missed = p.completion_time is None or p.completion_time > p.deadline
+            lateness = (p.completion_time - p.deadline) if p.completion_time is not None else None
+            events.append({
+                "pid": p.pid,
+                "program": p.program,
+                "deadline": p.deadline,
+                "completion": p.completion_time,
+                "lateness": max(lateness, 0) if lateness is not None else None,
+                "missed": missed,
+                "time": p.deadline,
+            })
+        return sorted(events, key=lambda e: (e["time"], e["pid"]))
+
+    @staticmethod
+    def deadline_metrics(processes: List[Process]) -> Dict:
+        events = MetricsEngine.deadline_events(processes)
+        if not events:
+            return {"deadline_jobs": 0, "deadline_misses": None, "deadline_miss_rate": None,
+                    "avg_lateness": None, "max_lateness": None}
+        misses = sum(e["missed"] for e in events)
+        # Lateness over completed jobs (0 when on time); incomplete jobs only count as misses
+        lateness = [e["lateness"] for e in events if e["lateness"] is not None]
+        return {
+            "deadline_jobs": len(events),
+            "deadline_misses": misses,
+            "deadline_miss_rate": misses / len(events),
+            "avg_lateness": sum(lateness) / len(lateness) if lateness else 0.0,
+            "max_lateness": max(lateness) if lateness else 0,
         }

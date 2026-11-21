@@ -1,4 +1,6 @@
 import random
+
+import numpy as np
 from typing import List
 
 from .process import Process
@@ -225,6 +227,25 @@ def build_processes(arrivals, bursts, programs) -> List[Process]:
 
 
 def sample_training_workload(rng, num_cores: int) -> List[Process]:
+    """
+    Training workload: 15% periodic real-time task sets; otherwise an aperiodic
+    workload (below) of which 45% get per-job deadlines (slack 1.5-6 × burst).
+    """
+    r = rng.random()
+    if r < 0.15:
+        from backend.simulator.realtime import expand_periodic, hyperperiod, random_task_set
+        u = rng.uniform(0.4, 1.0) * num_cores
+        tasks = random_task_set(int(rng.integers(3, 6)) + 2 * (num_cores - 1), u, rng,
+                                tolerance=0.05 * num_cores)
+        return expand_periodic(tasks, min(2 * hyperperiod(tasks), 300))
+    processes = _sample_aperiodic_workload(rng, num_cores)
+    if r < 0.15 + 0.85 * 0.45:
+        for p in processes:
+            p.deadline = p.arrival_time + max(1, int(np.ceil(p.burst_time * rng.uniform(1.5, 6.0))))
+    return processes
+
+
+def _sample_aperiodic_workload(rng, num_cores: int) -> List[Process]:
     """
     Fresh, randomised workload for RL training (never the seeded evaluation sets).
 

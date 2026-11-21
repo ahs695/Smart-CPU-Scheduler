@@ -155,3 +155,26 @@ Sections 3 and 4 are resolved by a redesign rather than patches:
 | 8 | 1.07 | 1.07 | 1.00 | **0.99** | 0.95 |
 
 Hybrid beats FCFS, RR, MLFQ and PPO at every core count (paired t-tests in `results/summary.csv`). PPO without predictions is far better than RR/MLFQ but only matches FCFS, which is close to optimal for a non-clairvoyant scheduler on most of these workloads. Old models are kept in `models/archive_2026-11-21/` (incompatible with the new env).
+
+---
+
+## 6. Deadline-aware retraining (November 2026, Phase 2)
+
+PPO and Hybrid were retrained so they also aim for deadlines (EDF/RMS, deadline metrics and SLA alerts were added in Phase 2).
+
+- **Features:** per process `has_deadline`, time to deadline, urgency `1/(1+slack)`, `overdue`; the Hybrid also gets predicted laxity (deadline − now − predicted remaining work).
+- **Reward:** the turnaround/switch terms plus `1.0` per missed deadline and `0.1` per late job per tick (summed over an episode = 0.1 × total lateness). Verified to match the metrics exactly.
+- **Training mix:** ~9% periodic task sets, ~37% aperiodic workloads with per-job deadlines (slack 1.5–6), the rest without deadlines.
+- **Checkpoint score:** turnaround/FCFS on deadline-free workloads + deadline miss rate on deadline workloads.
+- The turnaround-only models and their results are archived in `models/archive_2026-11-21_turnaround_only/`.
+
+Held-out results (`results/realtime.csv`, `results/rl_results.csv`):
+
+| | Avg deadline miss % (21 settings) | Turnaround vs FCFS, no deadlines (1 / 2 / 4 / 8 cores) |
+|---|---|---|
+| EDF | 20.9 | — |
+| RMS | 28.8 | — |
+| PPO, turnaround-only → deadline-aware | 30.6 → **22.7** | 1.02 / 1.01 / 1.03 / 1.00 → 1.01 / 1.00 / 1.01 / 1.00 |
+| Hybrid, turnaround-only → deadline-aware | 26.7 → **22.3** | 0.96 / 0.93 / 0.95 / 0.99 → 0.95 / 0.94 / 0.96 / 0.99 |
+
+On overloaded aperiodic workloads the Hybrid beats EDF (e.g. 75.3% vs 79.9% misses on 1 core, slack 3). EDF stays best on feasible single-core periodic sets, where it is provably optimal (0 misses); the learned policies still miss some at U = 1.0 on 1 core (PPO 7.4%, Hybrid 21.3%).

@@ -31,6 +31,7 @@ from gymnasium import spaces
 
 from backend.simulator.multi_core_simulator import MultiCoreSimulator
 from backend.simulator.process import Process
+from backend.simulator.scheduler_base import assign_keeping_cores, runnable_processes
 from backend.simulator.workload_generator import sample_training_workload
 from backend.rl.reward import RewardEngine
 
@@ -57,6 +58,8 @@ class SchedulingEnv(gym.Env):
     BASE_FEATURES = [
         "waiting", "attained", "age", "running",
         "log_waiting", "log_attained", "log_age",
+        # Deadline features (all 0 for a process without a deadline)
+        "has_deadline", "deadline_slack", "urgency", "overdue",
     ]
 
     def __init__(
@@ -117,6 +120,8 @@ class SchedulingEnv(gym.Env):
 
         self.processes = processes
         self.arrivals = sorted(p.arrival_time for p in processes)
+        self.deadline_procs = sorted((p for p in processes if p.deadline is not None), key=lambda p: p.deadline)
+        self.deadlines = [p.deadline for p in self.deadline_procs]
         self.simulator = MultiCoreSimulator(processes=processes, scheduler=self, num_cores=self.num_cores)
         self.simulator.reset()
         self.steps = 0
@@ -138,24 +143,52 @@ class SchedulingEnv(gym.Env):
         # Jobs present during this tick (arrived by `tick`, not completed before it)
         jobs_in_system = int(np.searchsorted(self.arrivals, tick, side="right")) - completed_before
         switches = sum(c.context_switches for c in sim.cores) - switches_before
-        reward = self.reward_engine.compute(jobs_in_system, switches)
+        new_misses, overdue = self._deadline_counts(tick)
+        reward = self.reward_engine.compute(jobs_in_system, switches, new_misses, overdue)
 
         terminated = sim_done
         truncated = (not terminated) and self.steps >= self.max_steps
         return self._get_state(), reward, terminated, truncated, {}
+
+    def _deadline_counts(self, tick: int):
+        """
+        After simulating `tick`:
+          new_misses — jobs whose deadline is tick+1 and are still unfinished
+                       (a job finishing exactly at its deadline meets it)
+          overdue    — jobs past their deadline during this tick (deadline <= tick,
+                       unfinished at its start); sums to total lateness.
+        """
+        if not self.deadlines:
+            return 0, 0
+        now = tick + 1
+        lo = int(np.searchsorted(self.deadlines, now, side="left"))
+        hi = int(np.searchsorted(self.deadlines, now, side="right"))
+        new_misses = sum(1 for p in self.deadline_procs[lo:hi] if p.completion_time is None)
+        past = int(np.searchsorted(self.deadlines, tick, side="right"))
+        overdue = sum(1 for p in self.deadline_procs[:past]
+                      if p.completion_time is None or p.completion_time > tick)
+        return new_misses, overdue
 
     # ------------------------------------------------------------
     # Scheduling decision (called by MultiCoreSimulator.step)
     # ------------------------------------------------------------
 
     def select_process(self, ready_queue, cores, time):
-        decisions = {core.core_id: core.current_process for core in cores}
-
-        running = [c.current_process for c in cores if c.current_process is not None]
-        running_ids = {id(p) for p in running}
-        runnable = running + [p for p in ready_queue if id(p) not in running_ids and not p.is_completed()]
+        runnable = runnable_processes(ready_queue, cores)
         if not runnable:
-            return decisions
+            return {core.core_id: core.current_process for core in cores}
+
+        running_ids = {id(c.current_process) for c in cores if c.current_process is not None}
+        feats = self._features(runnable, time, running_ids)
+        scores = feats @ self.current_action
+        # Deterministic tie-break: earlier arrival, then lower pid
+        order = sorted(
+            range(len(runnable)),
+            key=lambda i: (-scores[i], runnable[i].arrival_time, runnable[i].pid),
+        )
+        selected = [runnable[i] for i in order[: len(cores)]]
+        # Selected processes keep the core they already occupy
+        return assign_keeping_cores(selected, cores)
 
         feats = self._features(runnable, time, running_ids)
         scores = feats @ self.current_action
@@ -191,6 +224,9 @@ class SchedulingEnv(gym.Env):
         age = np.array([time - p.arrival_time for p in procs], dtype=np.float32)
         is_running = np.array([1.0 if id(p) in running_ids else 0.0 for p in procs], dtype=np.float32)
 
+        has_dl = np.array([0.0 if p.deadline is None else 1.0 for p in procs], dtype=np.float32)
+        slack = np.array([0.0 if p.deadline is None else p.deadline - time for p in procs], dtype=np.float32)
+
         cols = [
             waiting / TIME_SCALE,
             attained / TIME_SCALE,
@@ -199,7 +235,12 @@ class SchedulingEnv(gym.Env):
             np.log1p(waiting) / LOG_SCALE,
             np.log1p(attained) / LOG_SCALE,
             np.log1p(age) / LOG_SCALE,
+            has_dl,
+            np.clip(slack / TIME_SCALE, -2.0, 2.0) * has_dl,          # time left to the deadline
+            has_dl / (1.0 + np.maximum(slack, 0.0)),                    # 1 at/after the deadline, -> 0 when far
+            ((slack < 0) & (has_dl > 0)).astype(np.float32),            # already late
         ]
+        self._feature_time = time
         extra = self._extra_features(procs, attained)
         if extra is not None:
             cols.extend(extra)

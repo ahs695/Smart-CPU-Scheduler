@@ -34,7 +34,8 @@ from backend.simulator.workload_generator import sample_training_workload
 from backend.simulator.multi_core_simulator import MultiCoreSimulator
 from backend.simulator.metrics import MetricsEngine
 from backend.simulator.traditional.fcfs import FCFSScheduler
-from backend.simulator.traditional.sjf import SJFScheduler
+from backend.simulator.traditional.edf import EDFScheduler
+from backend.simulator.realtime import assign_deadlines, expand_periodic, hyperperiod, random_task_set
 
 LOG_DIR = os.path.join(MODELS_DIR, "training_logs")
 VAL_SEEDS = range(500, 506)           # fixed-type validation workloads (test seeds are 0-9)
@@ -70,9 +71,29 @@ def _env_factory(mode: str, num_cores: int, rank: int, seed: int):
 # ------------------------------------------------------------
 
 def validation_workloads(num_cores: int) -> List:
+    """Turnaround validation set: fixed workload types (no deadlines) + plain draws from the training mix."""
     workloads = [generate_workload(t, 30, s) for t in WORKLOAD_TYPES for s in VAL_SEEDS]
     rng = np.random.default_rng(VAL_RANDOM_SEED + num_cores)
-    workloads += [sample_training_workload(rng, num_cores) for _ in range(VAL_RANDOM_COUNT)]
+    while len(workloads) < len(WORKLOAD_TYPES) * len(VAL_SEEDS) + VAL_RANDOM_COUNT:
+        w = sample_training_workload(rng, num_cores)
+        if all(p.deadline is None for p in w):
+            workloads.append(w)
+    return workloads
+
+
+def deadline_validation_workloads(num_cores: int) -> List:
+    """Deadline validation set: fixed types with slack-3 deadlines + periodic sets near full load."""
+    workloads = []
+    for t in WORKLOAD_TYPES:
+        for s in VAL_SEEDS[:3]:
+            w = generate_workload(t, 30, s)
+            assign_deadlines(w, 3.0)
+            workloads.append(w)
+    rng = np.random.default_rng(VAL_RANDOM_SEED + 100 + num_cores)
+    for u in (0.7, 0.8, 0.9, 0.95, 1.0) * 3:
+        tasks = random_task_set(int(rng.integers(3, 6)) + 2 * (num_cores - 1), u * num_cores, rng,
+                                tolerance=0.05 * num_cores)
+        workloads.append(expand_periodic(tasks, min(2 * hyperperiod(tasks), 300)))
     return workloads
 
 
@@ -96,9 +117,12 @@ def run_policy(model, mode: str, procs, num_cores: int, lstm=None) -> Dict:
 
 class ValidationCallback(BaseCallback):
     """
-    Every `eval_freq` timesteps: run the deterministic policy on the validation
-    workloads, score = mean over workloads of (policy turnaround / FCFS turnaround),
-    save the best model, and append a row to the CSV learning curve.
+    Every `eval_freq` timesteps, run the deterministic policy on two held-out sets:
+      - turnaround set: score = mean(policy turnaround / FCFS turnaround)
+      - deadline set:   score = mean deadline miss rate (EDF shown for reference)
+    Checkpoint score = turnaround ratio + deadline miss rate (lower is better),
+    so a 10-point miss-rate drop is worth a 10% turnaround change. The best
+    checkpoint is saved and every evaluation appended to the CSV learning curve.
     """
 
     def __init__(self, mode, num_cores, save_path, log_path, eval_freq, lstm=None):
@@ -108,40 +132,41 @@ class ValidationCallback(BaseCallback):
         self.eval_freq, self.lstm = eval_freq, lstm
         self.workloads = validation_workloads(num_cores)
         self.fcfs = [_traditional(FCFSScheduler(), w, num_cores)["avg_turnaround_time"] for w in self.workloads]
-        self.srtf = [_traditional(SJFScheduler(preemptive=True), w, num_cores)["avg_turnaround_time"] for w in self.workloads]
+        self.dl_workloads = deadline_validation_workloads(num_cores)
+        self.edf_miss = float(np.mean([_traditional(EDFScheduler(), w, num_cores)["deadline_miss_rate"]
+                                       for w in self.dl_workloads]))
         self.best = float("inf")
         self.next_eval = eval_freq
         self.start = time.time()
         with open(log_path, "w", newline="") as f:
             csv.writer(f).writerow(["timesteps", "minutes", "ep_rew_mean", "val_ratio_fcfs",
-                                    "val_ratio_srtf", "val_turnaround", "val_waiting", "best"])
+                                    "val_miss_rate", "edf_miss_rate", "score", "best"])
 
     def evaluate(self):
-        ratios_f, ratios_s, tat, wait = [], [], [], []
-        for w, f, s in zip(self.workloads, self.fcfs, self.srtf):
-            m = run_policy(self.model, self.mode, w, self.num_cores, self.lstm)
-            ratios_f.append(m["avg_turnaround_time"] / f)
-            ratios_s.append(m["avg_turnaround_time"] / s)
-            tat.append(m["avg_turnaround_time"])
-            wait.append(m["avg_waiting_time"])
-        return float(np.mean(ratios_f)), float(np.mean(ratios_s)), float(np.mean(tat)), float(np.mean(wait))
+        ratios = [run_policy(self.model, self.mode, w, self.num_cores, self.lstm)["avg_turnaround_time"] / f
+                  for w, f in zip(self.workloads, self.fcfs)]
+        misses = [run_policy(self.model, self.mode, w, self.num_cores, self.lstm)["deadline_miss_rate"]
+                  for w in self.dl_workloads]
+        return float(np.mean(ratios)), float(np.mean(misses))
 
     def _on_step(self) -> bool:
         if self.num_timesteps < self.next_eval:
             return True
         self.next_eval += self.eval_freq
-        r_f, r_s, tat, wait = self.evaluate()
-        improved = r_f < self.best
+        ratio, miss = self.evaluate()
+        score = ratio + miss
+        improved = score < self.best
         if improved:
-            self.best = r_f
+            self.best = score
             self.model.save(self.save_path)
         ep_rew = [e["r"] for e in self.model.ep_info_buffer] if self.model.ep_info_buffer else [float("nan")]
         minutes = (time.time() - self.start) / 60
         with open(self.log_path, "a", newline="") as f:
             csv.writer(f).writerow([self.num_timesteps, f"{minutes:.1f}", f"{np.mean(ep_rew):.2f}",
-                                    f"{r_f:.4f}", f"{r_s:.4f}", f"{tat:.2f}", f"{wait:.2f}", int(improved)])
+                                    f"{ratio:.4f}", f"{miss:.4f}", f"{self.edf_miss:.4f}", f"{score:.4f}", int(improved)])
         print(f"[{self.mode}-{self.num_cores}c] {self.num_timesteps:>9,} steps {minutes:6.1f} min | "
-              f"val turnaround/FCFS {r_f:.4f}  /SRTF {r_s:.4f}{'  * saved' if improved else ''}", flush=True)
+              f"turnaround/FCFS {ratio:.4f}  miss {miss:.3f} (EDF {self.edf_miss:.3f})  score {score:.4f}"
+              f"{'  * saved' if improved else ''}", flush=True)
         return True
 
 
@@ -198,7 +223,7 @@ def train(mode: str, num_cores: int, timesteps: int, n_envs: int, seed: int, eva
     callback.next_eval = 0
     callback._on_step()
     venv.close()
-    print(f"=== Done {mode}-{num_cores}c: best val turnaround/FCFS {callback.best:.4f} -> {save_path}.zip ===", flush=True)
+    print(f"=== Done {mode}-{num_cores}c: best val score {callback.best:.4f} -> {save_path}.zip ===", flush=True)
     return callback.best
 
 

@@ -204,3 +204,7 @@
     border-right-color: rgba(255, 255, 255, 0.06);
   }
 }
+
+:root[data-theme="light"] .logo-title {
+  background-image: linear-gradient(90deg, #0e7490, #7c3aed, #e11d48, #0e7490);
+}
