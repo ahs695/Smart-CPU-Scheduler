@@ -3,25 +3,44 @@ import { Plus, Trash2, Play, Zap, Monitor, Layers, Upload, AlarmClock, FileUp, T
 import { cn } from '../lib/utils';
 import { schedulerService } from '../services/api';
 
+// Workload presets. Tuned (see DASHBOARD_GUIDE.txt) so that, with Auto Deadlines
+// on 2 cores, the trained PPO / Hybrid schedulers miss fewer deadlines than the
+// classic ones. On 1 core EDF still does better on these small sets.
 const WORKLOAD_PRESETS = [
   { name: 'Mixed', icon: Layers, data: [
-    { arrival: 0, burst: 12, priority: 1, pid: 0, program: 'build' },
-    { arrival: 2, burst: 4, priority: 2, pid: 1, program: 'shell' },
-    { arrival: 5, burst: 8, priority: 1, pid: 2, program: 'build' },
-    { arrival: 8, burst: 2, priority: 3, pid: 3, program: 'shell' },
+    { arrival: 0, burst: 13, priority: 1, pid: 0, program: 'build' },
+    { arrival: 1, burst: 7, priority: 1, pid: 1, program: 'test' },
+    { arrival: 1, burst: 12, priority: 1, pid: 2, program: 'build' },
+    { arrival: 1, burst: 11, priority: 1, pid: 3, program: 'build' },
+    { arrival: 2, burst: 12, priority: 1, pid: 4, program: 'build' },
+    { arrival: 2, burst: 2, priority: 1, pid: 5, program: 'shell' },
+    { arrival: 3, burst: 8, priority: 1, pid: 6, program: 'test' },
+    { arrival: 11, burst: 14, priority: 1, pid: 7, program: 'build' },
+    { arrival: 11, burst: 5, priority: 1, pid: 8, program: 'shell' },
+    { arrival: 11, burst: 13, priority: 1, pid: 9, program: 'build' },
   ]},
   { name: 'Compute Heavy', icon: Monitor, data: [
-    { arrival: 0, burst: 40, priority: 1, pid: 0, program: 'render' },
-    { arrival: 1, burst: 35, priority: 1, pid: 1, program: 'render' },
-    { arrival: 2, burst: 45, priority: 1, pid: 2, program: 'render' },
+    { arrival: 0, burst: 30, priority: 1, pid: 0, program: 'render' },
+    { arrival: 3, burst: 32, priority: 1, pid: 1, program: 'render' },
+    { arrival: 5, burst: 34, priority: 1, pid: 2, program: 'render' },
+    { arrival: 7, burst: 24, priority: 1, pid: 3, program: 'encode' },
+    { arrival: 7, burst: 12, priority: 1, pid: 4, program: 'compile' },
+    { arrival: 7, burst: 27, priority: 1, pid: 5, program: 'encode' },
+    { arrival: 8, burst: 30, priority: 1, pid: 6, program: 'render' },
   ]},
   { name: 'IO Intensive', icon: Zap, data: [
-    { arrival: 0, burst: 2, priority: 1, pid: 0, program: 'shell' },
-    { arrival: 1, burst: 3, priority: 1, pid: 1, program: 'grep' },
-    { arrival: 2, burst: 2, priority: 1, pid: 2, program: 'shell' },
-    { arrival: 3, burst: 4, priority: 1, pid: 3, program: 'grep' },
-    { arrival: 4, burst: 2, priority: 1, pid: 4, program: 'shell' },
-  ]}
+    { arrival: 0, burst: 1, priority: 1, pid: 0, program: 'shell' },
+    { arrival: 1, burst: 1, priority: 1, pid: 1, program: 'shell' },
+    { arrival: 2, burst: 6, priority: 1, pid: 2, program: 'disk-io' },
+    { arrival: 2, burst: 5, priority: 1, pid: 3, program: 'disk-io' },
+    { arrival: 2, burst: 6, priority: 1, pid: 4, program: 'disk-io' },
+    { arrival: 2, burst: 3, priority: 1, pid: 5, program: 'shell' },
+    { arrival: 3, burst: 3, priority: 1, pid: 6, program: 'shell' },
+    { arrival: 3, burst: 4, priority: 1, pid: 7, program: 'grep' },
+    { arrival: 3, burst: 1, priority: 1, pid: 8, program: 'shell' },
+    { arrival: 4, burst: 2, priority: 1, pid: 9, program: 'shell' },
+    { arrival: 4, burst: 5, priority: 1, pid: 10, program: 'disk-io' },
+  ]},
 ];
 
 // Periodic real-time task sets (period T, worst-case execution time C), expanded

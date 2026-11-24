@@ -1,0 +1,168 @@
+AIMOS DASHBOARD - QUICK GUIDE TO CHECKING RESULTS YOURSELF
+==========================================================
+
+THE CONTROLS (left panel)
+-------------------------
+Scheduler        Which algorithm the Gantt chart, alerts and metric cards show.
+CPU Cores        1, 2, 4 or 8. Also used by the comparison table.
+RR Time Quantum  Only affects Round Robin.
+Mixed / Compute Heavy / IO Intensive
+                 Small normal workloads. No deadlines until you add them.
+RT Schedulable   Periodic real-time tasks, light load (U = 0.75).
+RT Overloaded    Periodic real-time tasks, heavy load (U = 0.96).
+Auto Deadlines   Gives every job without one: deadline = arrival + 3 x burst.
+Import Cluster Trace (+ Auto-detect)
+                 Loads 60 jobs from a Google or Alibaba trace file.
+
+WHERE TO LOOK
+-------------
+Comparison table     ALL schedulers on the same workload. Easiest place to
+                     compare. "Deadline Miss" column appears when deadlines
+                     exist.
+SLA Breach Alerts    The selected scheduler only. Press Play on the Gantt
+                     chart; misses appear when their deadline passes.
+Red outlines         Jobs that missed, in the Gantt chart.
+
+TERMS
+-----
+Periodic    A task repeats every T ticks (T=x tag in the Program column).
+            Deadline = next release. This is what the RT presets load.
+Aperiodic   Jobs arrive once, at any time (Mixed, IO, traces). Deadlines
+            come from Auto Deadlines, a trace, or typing them in.
+Schedulable The load fits and the theory guarantees every deadline can
+            be met (EDF and RMS both meet them).
+Overloaded  Here: too heavy for RMS's guarantee (U above 0.78) but still
+            fits one CPU (U below 1), so EDF meets every deadline and
+            RMS does not.
+
+
+RECIPES AND WHAT YOU SHOULD SEE
+===============================
+Numbers are deadline misses (misses / jobs with a deadline). The comparison
+table shows the same thing as a %. Quantum = 2. Measured on the current
+models on 2026-11-24.
+
+1. PERIODIC, SCHEDULABLE
+   Cores 1 -> RT Schedulable -> pick EDF, then RMS -> Run -> Play
+   Expect: EDF 0/26, RMS 0/26  ("Every deadline met.")
+   SLA panel line: "RMS guaranteed schedulable - EDF feasible".
+   Table: everyone 0% except Hybrid 1/26 (3.8%).
+
+2. PERIODIC, OVERLOADED  (the main EDF vs RMS demo)
+   Cores 1 -> RT Overloaded -> RMS -> Run -> 10x -> Play
+   Expect: RMS 2/18 (11.1%): alerts at t=12 and t=36, logger jobs
+           outlined red. SLA line says "RMS not guaranteed".
+   Then EDF -> Run -> Play
+   Expect: EDF 0/18 ("Every deadline met.").
+   Table (1 core): FCFS 0, SJF 0, RR 2, MLFQ 4, EDF 0, RMS 2,
+                   PPO 2, Hybrid 3.
+   (FCFS and SJF also happen to meet every deadline on this particular
+    set; only EDF is guaranteed to on every set with U below 1.)
+
+3. SAME SETS ON MORE CORES
+   RT Schedulable or RT Overloaded with Cores 2 or 4
+   Expect: 0 misses for every scheduler. The work is spread over more
+   CPUs, so nothing is overloaded any more.
+
+4. APERIODIC WITH DEADLINES (Mixed / Compute Heavy / IO Intensive)
+   Preset -> Auto Deadlines -> Run. On 2 cores see the SHOWCASE DEMOS
+   below. On 1 core (honest comparison - the models do NOT win here):
+     Mixed          /10: FCFS 7, SJF 8, RR 10, MLFQ 10, EDF 5, RMS 7,
+                         PPO 8, Hybrid 8
+     Compute Heavy  /7:  FCFS 4, SJF 4, RR 7, MLFQ 7, EDF 4, RMS 4,
+                         PPO 4, Hybrid 4
+     IO Intensive   /11: FCFS 6, SJF 4, RR 9, MLFQ 9, EDF 4, RMS 6,
+                         PPO 4, Hybrid 6
+   On 4 cores almost nobody misses (0-1 for every scheduler).
+   (RMS acts like FCFS here: these jobs have no period.)
+
+5. REAL-WORLD STYLE (trace), Google
+   Pick Cores FIRST (the import uses it), then Import Cluster Trace with
+   backend/experiments/sample_traces/synthetic_google_task_events.csv
+   31 of the 60 jobs get deadlines automatically.
+   1 core: FCFS 10, SJF 9, RR 18, MLFQ 17, EDF 0, RMS 10, PPO 10, Hybrid 9
+   2 cores: FCFS 3, SJF 2, RR 6, MLFQ 5, EDF 0, RMS 3, PPO 4, Hybrid 2
+
+6. REAL-WORLD STYLE (trace), Alibaba
+   Pick Cores -> Import synthetic_alibaba_batch_task.csv -> Auto Deadlines
+   (Alibaba jobs arrive WITHOUT deadlines; without this step there is
+    nothing to miss.)
+   1 core:  FCFS 24, SJF 14, RR 27, MLFQ 28, EDF 9, RMS 24, PPO 12, Hybrid 8
+   2 cores: FCFS 16, SJF 6,  RR 16, MLFQ 13, EDF 1, RMS 16, PPO 3,  Hybrid 1
+   This is the case where Hybrid beats EDF: heavy load with many
+   deadlines.
+
+7. NO DEADLINES (speed only, Phase 1 behaviour)
+   Any of Mixed / Compute Heavy / IO Intensive, without Auto Deadlines.
+   Compare Avg Waiting and Avg Turnaround in the table. No SLA alerts.
+   EDF and RMS behave like FCFS here.
+
+
+SHOWCASE DEMOS - WHERE OUR TRAINED MODELS (PPO / HYBRID) WIN
+============================================================
+The three workload presets were chosen so the trained schedulers clearly
+beat the classic ones on 2 cores (the default). All numbers below were
+read from the dashboard's comparison table (Deadline Miss column).
+Tip: choose Hybrid or PPO as Scheduler and Play the Gantt chart to show
+the SLA panel staying (almost) empty, then switch to FCFS or RR to show
+the alerts piling up.
+
+DEMO A - Mixed (build / test / shell jobs), 2 cores
+   Cores 2 -> Mixed -> Auto Deadlines -> Scheduler PPO -> Run -> Play
+   Deadline misses (10 jobs):
+     PPO 0% | Hybrid 10% | EDF 20% | SJF 30% | FCFS 40% | RMS 40% |
+     MLFQ 50% | RR 70%
+   Message: both models beat every classic scheduler, including EDF and
+   SJF (which cheats by knowing true job lengths). PPO meets EVERY
+   deadline ("Every deadline met." in the SLA panel).
+
+DEMO B - IO Intensive (shell / grep / disk-io jobs), 2 cores
+   Cores 2 -> IO Intensive -> Auto Deadlines -> Scheduler Hybrid -> Run
+   Deadline misses (11 jobs):
+     PPO 0% | Hybrid 0% | EDF 9.1% | SJF 9.1% | FCFS 45.5% | RMS 45.5% |
+     RR 45.5% | MLFQ 45.5%
+   Message: only our two models meet every deadline. Bonus: with no
+   deadlines (skip Auto Deadlines) the Hybrid also has the lowest
+   turnaround of all non-oracle schedulers (7.8 vs FCFS/EDF 9.2).
+
+DEMO C - Compute Heavy (render / encode / compile jobs), 2 cores
+   Cores 2 -> Compute Heavy -> Auto Deadlines -> Scheduler Hybrid -> Run
+   Deadline misses (7 jobs):
+     PPO 0% | Hybrid 0% | SJF 0% | EDF 14.3% | FCFS 42.9% | RMS 42.9% |
+     RR 42.9% | MLFQ 57.1%
+   Message: on long CPU-bound jobs the models match the SJF oracle
+   (without knowing job lengths) and beat EDF and all the rest.
+
+DEMO D - Real-world style trace, 1 core
+   Cores 1 -> Import Cluster Trace ->
+   backend/experiments/sample_traces/synthetic_alibaba_batch_task.csv
+   -> Auto Deadlines -> Run
+   Deadline misses (60 jobs):
+     Hybrid 8 | EDF 9 | PPO 12 | SJF 14 | FCFS 24 | RMS 24 | RR 27 |
+     MLFQ 28
+   Message: on an overloaded single CPU with trace-style jobs, the Hybrid
+   beats every scheduler, EDF included. (On 2 cores Hybrid and EDF tie
+   at 1 miss; PPO 3.)
+
+BE READY FOR THIS QUESTION
+   "Do the models always win?" - No. On 1 core with the small presets,
+   and on periodic RT sets, EDF is as good or better (it is provably
+   optimal on one core when the load fits). Over 21 benchmark settings
+   (PHASE2.txt, section 13) EDF averages 20.9% misses, Hybrid 22.3%,
+   PPO 22.7%, FCFS 32.4%. The models' strength is busy multi-core and
+   overloaded workloads, which is what demos A-D show.
+
+
+QUICK RULES OF THUMB
+--------------------
+- To see deadlines matter: 1 core + RT Overloaded, or a trace on 1 core.
+- More cores = fewer misses; on 4 cores the presets hardly miss at all.
+- EDF is best when the load fits; Hybrid/PPO can beat EDF when the system
+  is overloaded (Alibaba trace).
+- RMS only differs from FCFS on periodic (RT) workloads.
+- Changing Scheduler only changes the Gantt chart, alerts and cards; the
+  comparison table always shows every scheduler.
+- The 21-setting results in PHASE2.txt (section 13) come from the script
+  backend/experiments/run_realtime.py (many random task sets and slack
+  levels). The dashboard cannot generate those random sets; use it for the
+  recipes above.

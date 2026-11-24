@@ -1,0 +1,586 @@
+===============================================================================
+ AIMOS - PHASE 2: REAL-TIME & ENTERPRISE SCHEDULING
+ Deadlines, EDF/RMS, cluster-trace import, SLA alerts, deadline-aware RL,
+ light/dark theme
+===============================================================================
+
+Last updated: 2026-11-23
+
+CONTENTS
+  1.  Summary
+  2.  Why this option was chosen
+  3.  Core concept: deadlines
+  4.  Periodic real-time tasks (RT presets)
+  5.  New schedulers: EDF and RMS
+  6.  Cluster-trace import (Google / Alibaba)
+  7.  The Program column
+  8.  Deadline metrics
+  9.  Backend changes (file by file)
+  10. API changes
+  11. Dashboard changes (file by file)
+  12. Deadline-aware retraining of PPO and Hybrid
+  13. Experiments and results
+  14. Light / dark theme
+  15. Verification performed
+  16. How to run and demo
+  17. Getting real trace files
+  18. Known limitations and possible next steps
+
+
+-------------------------------------------------------------------------------
+1. SUMMARY
+-------------------------------------------------------------------------------
+
+Phase 2 turns AIMOS from a speed-only scheduler simulator into a real-time
+scheduling lab:
+
+  * Jobs can carry a DEADLINE (an absolute tick by which they must finish).
+  * Periodic real-time task sets can be generated (period T, run time C);
+    each job gets the implicit deadline release + T.
+  * Two classic real-time schedulers were added: EDF (Earliest Deadline
+    First) and RMS (Rate Monotonic Scheduling).
+  * Real cluster traces (Google 2011 task_events, Alibaba 2018 batch_task)
+    can be imported and converted into dashboard workloads.
+  * Deadline metrics (miss rate, lateness) are computed everywhere.
+  * The dashboard shows live SLA breach alerts during Gantt playback,
+    red outlines on jobs that missed, deadline metric cards, a Deadline
+    Miss column in the comparison table, and an RMS/EDF schedulability
+    verdict.
+  * PPO and Hybrid were retrained with a deadline penalty, so the learned
+    schedulers now understand deadlines too.
+  * The dashboard got a light mode with a toggle button.
+
+
+-------------------------------------------------------------------------------
+2. WHY THIS OPTION WAS CHOSEN
+-------------------------------------------------------------------------------
+
+Three Phase 2 packages were considered: OS Realism, Green AI, and
+Enterprise & Real-Time. Option 3 (Enterprise & Real-Time) was chosen
+because it fits the existing code best:
+
+  * EDF and RMS follow the existing scheduler pattern
+    (SchedulerBase.select_process(ready_queue, cores, time)).
+  * Deadlines are two optional fields on Process; the simulator loop did
+    not need to change.
+  * The per-tick trace already returned by /simulate was enough to drive
+    live SLA alerts.
+  * Everything new is visible in the dashboard.
+
+
+-------------------------------------------------------------------------------
+3. CORE CONCEPT: DEADLINES
+-------------------------------------------------------------------------------
+
+A deadline is the absolute tick by which a job must be complete.
+
+  Met       completion_time <= deadline
+  Missed    completion_time >  deadline, OR the job never completed
+  Lateness  max(completion_time - deadline, 0); None if never completed
+  Miss rate misses / (jobs that have a deadline)
+
+Jobs with a blank deadline are ignored by every deadline metric and behave
+exactly as in Phase 1. A deadline must be later than the job's arrival.
+
+Where deadlines come from:
+  * typed by hand in the Deadline column,
+  * the RT presets (implicit deadline = release + period),
+  * Auto Deadlines:  deadline = arrival + ceil(3 x burst)   (slack = 3),
+  * Google trace scheduling classes (see section 6),
+  * the Deadline column of an imported CSV.
+
+
+-------------------------------------------------------------------------------
+4. PERIODIC REAL-TIME TASKS (RT PRESETS)
+-------------------------------------------------------------------------------
+
+A periodic task (name, period T, worst-case execution time C, phase)
+releases a job every T ticks; each job needs C ticks of CPU and must finish
+before the next release (implicit deadline = release + T).
+
+The backend expands a task set into individual jobs over TWO HYPERPERIODS
+(hyperperiod = LCM of the periods, capped at 2000 ticks / 400 jobs). Each
+job gets program = task name, period = T, deadline = release + T.
+
+  Utilisation         U = sum(C_i / T_i)
+  Liu & Layland bound n * (2^(1/n) - 1)   (0.780 for n = 3)
+
+  On one core:
+    * RMS is GUARANTEED to meet every deadline if U <= the bound.
+    * EDF meets every deadline if and only if U <= 1 (EDF is optimal).
+  On several cores the dashboard compares U / cores with the same bound;
+  this is only a heuristic (and labelled as such).
+
+Presets (frontend/src/components/InputPanel.jsx, RT_PRESETS):
+
+  Preset          Tasks (T, C)                          U      Jobs/ticks
+  RT Schedulable  sensor(8,2) control(12,3) logger(16,4) 0.750  26 / 96
+  RT Overloaded   sensor(6,2) control(8,3)  logger(12,3) 0.958  18 / 48
+
+  RT Schedulable: below the RMS bound, so EDF and RMS both meet every
+                  deadline on 1 core.
+  RT Overloaded:  above the RMS bound but below 1, so on 1 core EDF misses
+                  0 of 18 and RMS misses 2 (P2 at t=12, P11 at t=36).
+                  This is the textbook EDF-vs-RMS result.
+
+"T=x" next to a program name in the workload table is the period of the
+task the job came from. Only jobs from periodic tasks show it; RMS uses it.
+
+
+-------------------------------------------------------------------------------
+5. NEW SCHEDULERS: EDF AND RMS
+-------------------------------------------------------------------------------
+
+Both are preemptive and global: each tick, all ready and running jobs are
+ranked and the top N (N = cores) run. A selected job that is already
+running keeps its core; newcomers fill idle cores first, then preempted
+ones. This avoids fake migrations (shared helper assign_keeping_cores).
+
+  EDF (backend/simulator/traditional/edf.py)
+    Rank key: (no deadline, deadline, arrival, pid)
+    Soonest deadline first; jobs without a deadline run last in FCFS order.
+    Dynamic priority. Optimal on one core.
+
+  RMS (backend/simulator/traditional/rms.py)
+    Rank key: (no period, period, arrival, pid)
+    Shortest period first; jobs without a period run last in FCFS order.
+    Fixed priority per task. Simple and predictable (avionics,
+    automotive), but not optimal.
+
+Without deadlines EDF behaves like FCFS; without periods RMS does too.
+On several cores even EDF can miss at high load (the Dhall effect).
+
+
+-------------------------------------------------------------------------------
+6. CLUSTER-TRACE IMPORT (GOOGLE / ALIBABA)
+-------------------------------------------------------------------------------
+
+File: backend/experiments/trace_import.py
+
+Supported formats (CSV, no header, as published):
+
+  google   Google cluster-data 2011, task_events table, 13 columns
+           (timestamp in microseconds, ..., event type, user,
+           scheduling class, ...). Events used: 0 SUBMIT, 1 SCHEDULE,
+           4 FINISH. One task -> one job:
+             arrival = SUBMIT, burst = FINISH - SCHEDULE, program = user.
+
+  alibaba  Alibaba cluster-trace-v2018, batch_task.csv, 9 columns
+           (task_name, instance_num, job_name, task_type, status,
+           start_time, end_time, plan_cpu, plan_mem), times in seconds.
+           Only status "Terminated". arrival = start_time,
+           burst = end_time - start_time, program = job_name.
+
+Format selector in the dashboard:
+  Auto-detect  counts the columns of the first row: 13 = Google,
+               9 = Alibaba, anything else = clear error.
+  Google / Alibaba  forces that parser; a file in the other format is
+               rejected ("Line 1: expected 13 columns, got 9").
+  For a correct file, Auto-detect and the explicit choice give identical
+  results. The selector changes nothing until a file is imported.
+
+Downscaling (to_processes):
+  1. Completed tasks only, sorted by arrival.
+  2. A window of max_jobs (dashboard: 60) consecutive tasks.
+  3. One time scale for durations AND arrival gaps: the 95th-percentile
+     duration maps to 50 ticks (preserves the trace's shape).
+  4. Bursts clipped to [1, 50] ticks (the range the RL models and LSTM
+     were trained on).
+  5. Optional load: arrivals compressed/stretched so offered load is about
+     load x cores (dashboard: 0.9).
+  6. Deadlines:
+       Google scheduling class 3 -> arrival + 2 x burst
+                               2 -> arrival + 3 x burst
+                               1 -> arrival + 5 x burst
+                               0 -> none (batch)
+       Alibaba -> none (use Auto Deadlines afterwards), unless a slack
+       is passed to the API.
+
+The status line shows e.g.
+  "Imported 60 of 73 tasks (alibaba) - 6.5 s/tick - 0 with deadlines".
+
+Sample files (synthetic, no real data, generated by make_synthetic.py):
+  backend/experiments/sample_traces/synthetic_google_task_events.csv
+      -> 60 of 80 tasks imported, 31 with deadlines, 6 programs
+  backend/experiments/sample_traces/synthetic_alibaba_batch_task.csv
+      -> 60 of 73 tasks imported, 0 with deadlines, 8 programs
+
+Effect on scheduling: the schedulers do not change; they are tested on
+real, uneven workloads (few long jobs, many short ones, bursty arrivals,
+recurring programs). FCFS suffers from long jobs blocking short ones;
+SJF/SRTF and the Hybrid gain the most.
+
+
+-------------------------------------------------------------------------------
+7. THE PROGRAM COLUMN
+-------------------------------------------------------------------------------
+
+Program is an optional free-text label (max 24 characters) naming which
+program a job is a run of. (It was introduced in the retraining just
+before Phase 2 and reused by Phase 2.)
+
+  Source                     Values
+  Mixed/Compute/IO presets   build, shell, render, grep
+  RT presets                 sensor, control, logger
+  Google trace               user (anonymised ID)
+  Alibaba trace              job_name (e.g. j_1005)
+  CSV import                 a column named program, command, cmd or exe
+  Hand-added rows            blank until typed
+
+Used by: the Hybrid (its LSTM predicts a job's burst from the last 8
+finished bursts of the same program) and the SLA alert text. All other
+schedulers ignore it; RMS uses the period, not the program.
+
+
+-------------------------------------------------------------------------------
+8. DEADLINE METRICS
+-------------------------------------------------------------------------------
+
+File: backend/simulator/metrics.py
+
+  MetricsEngine.deadline_events(processes)
+    One record per job with a deadline, sorted by time:
+    {pid, program, deadline, completion, lateness, missed, time}
+    time = the deadline tick (when a miss becomes certain); used to raise
+    SLA alerts in playback order.
+
+  MetricsEngine.deadline_metrics(processes)
+    deadline_jobs, deadline_misses, deadline_miss_rate,
+    avg_lateness (over completed deadline jobs, on-time = 0), max_lateness.
+    All None (deadline_jobs = 0) when no job has a deadline.
+
+  MetricsEngine.summarize() now includes these fields.
+
+
+-------------------------------------------------------------------------------
+9. BACKEND CHANGES (FILE BY FILE)
+-------------------------------------------------------------------------------
+
+backend/simulator/process.py
+  New optional fields: deadline: Optional[int], period: Optional[int]
+  (after program, so positional construction is unchanged).
+
+backend/simulator/scheduler_base.py
+  runnable_processes(ready_queue, cores)  ready + running, de-duplicated.
+  assign_keeping_cores(selected, cores)   core assignment that keeps
+                                          running jobs on their core.
+
+backend/simulator/traditional/edf.py   NEW  EDFScheduler
+backend/simulator/traditional/rms.py   NEW  RMSScheduler
+
+backend/simulator/realtime.py          NEW
+  validate_tasks, expand_periodic(tasks, horizon), hyperperiod,
+  utilisation, liu_layland_bound, schedulability(tasks, num_cores),
+  tasks_from_processes, assign_deadlines(processes, slack),
+  random_task_set(n_tasks, utilisation, rng, tolerance)
+    (UUniFast-Discard; wcet = floor(u x period); redrawn until the real
+     U is in [target - tolerance, target], never above, so a "U = 1.0"
+     single-core set really is EDF-feasible),
+  utilisation_of, PERIODS = [5, 8, 10, 12, 15, 20, 24, 30, 40],
+  MAX_HORIZON = 2000, MAX_JOBS = 400.
+
+backend/simulator/metrics.py           deadline_events, deadline_metrics
+
+backend/simulator/workload_generator.py
+  sample_training_workload(rng, num_cores) now mixes deadline workloads
+  into RL training (section 12).
+
+backend/experiments/trace_import.py    NEW  (section 6)
+backend/experiments/sample_traces/     NEW  synthetic files, generator,
+                                            README
+backend/experiments/run_realtime.py    NEW  (section 13)
+
+backend/rl/env.py, backend/hybrid/hybrid_scheduler.py, backend/rl/reward.py,
+backend/rl/train_ppo.py
+  Deadline-aware features, reward and validation (section 12).
+
+backend/app.py
+  * TRADITIONAL_SCHEDULERS = FCFS, SJF, RR, MLFQ, EDF, RMS
+  * get_scheduler supports "EDF" and "RMS".
+  * _parse_processes accepts program, deadline (> arrival) and
+    period (>= 1).
+  * Simulation results include deadline_events; /simulate adds a
+    "realtime" schedulability block when jobs carry periods.
+  * New routes (section 10). MAX_CONTENT_LENGTH = 64 MB for uploads.
+
+
+-------------------------------------------------------------------------------
+10. API CHANGES
+-------------------------------------------------------------------------------
+
+Existing routes
+  POST /simulate   process fields deadline / period / program accepted;
+                   response adds deadline_events, deadline metrics in
+                   metrics, and "realtime" for periodic sets:
+                   {utilisation, per_core_utilisation, rms_bound,
+                    rms_guaranteed, edf_feasible, exact, num_tasks}
+  POST /compare    EDF and RMS included; each result carries the deadline
+                   metrics.
+
+New routes
+  POST /workload/periodic
+       body {tasks: [{name, period, wcet, phase?}], horizon?, num_cores?}
+       -> {processes, horizon, utilisation, rms_bound, ...}
+       default horizon = 2 hyperperiods (max 2000)
+  POST /workload/deadlines
+       body {processes, slack}  -> processes with
+       deadline = arrival + ceil(burst x slack) where missing
+  POST /import-trace   (multipart)
+       file, format = auto|google|alibaba, max_jobs, offset, load,
+       num_cores, slack  -> {processes, format, stats}
+       stats: completed_tasks_in_file, imported, seconds_per_tick,
+              clipped_bursts, with_deadline, programs
+
+All new routes validate input and return HTTP 400 with an error message.
+
+
+-------------------------------------------------------------------------------
+11. DASHBOARD CHANGES (FILE BY FILE)
+-------------------------------------------------------------------------------
+
+frontend/src/services/api.js
+  periodicWorkload, addDeadlines, importTrace; compareProcesses options.
+
+frontend/src/components/InputPanel.jsx
+  * Scheduler dropdown: Earliest Deadline First (real-time),
+    Rate Monotonic (real-time).
+  * "Real-Time & Traces" section: RT Schedulable, RT Overloaded,
+    Auto Deadlines, format selector (Auto-detect / Google / Alibaba),
+    Import Cluster Trace; status line under the buttons.
+  * Workload table: Program column with T=x period tag, Deadline column.
+  * CSV import also reads program and deadline columns.
+
+frontend/src/components/SLAAlerts.jsx   NEW
+  Live breach feed under the Gantt chart:
+  * counter "N breaches of M deadline jobs" (red / green),
+  * schedulability line for periodic sets (U, RMS bound, verdicts),
+  * alerts newest first: "P11 (logger) missed its deadline at t=36
+    +3 late" or "never finished",
+  * end-of-run summary ("Every deadline met." or miss count, %, worst
+    lateness).
+  A breach is shown only once Gantt playback passes its deadline; replay
+  and new runs reset the feed. Without deadlines it shows a hint.
+
+frontend/src/components/GanttChart.jsx
+  onTimeChange callback (playback time lifted to Dashboard for the
+  alerts), red outline on jobs that missed, deadline in tooltip.
+
+frontend/src/components/MetricsPanel.jsx
+  Deadline Misses (% and count) and Avg Lateness cards, shown only when
+  the workload has deadlines.
+
+frontend/src/components/Dashboard.jsx
+  Wires SLA alerts and playback time; Deadline Miss column in the
+  comparison table (shown when deadlines exist); "How to Use" step 06
+  "Deadlines & SLA Alerts"; theme toggle (section 14).
+
+
+-------------------------------------------------------------------------------
+12. DEADLINE-AWARE RETRAINING OF PPO AND HYBRID
+-------------------------------------------------------------------------------
+
+Goal: the learned schedulers should respect deadlines without losing
+their turnaround performance.
+
+New per-job features (backend/rl/env.py, BASE_FEATURES):
+  has_deadline, deadline_slack (time left), urgency, overdue.
+Hybrid extra feature (backend/hybrid/hybrid_scheduler.py):
+  pred_laxity = time left - predicted remaining work (LSTM).
+Observation size: PPO 97, Hybrid 137.
+
+Reward per tick (backend/rl/reward.py, RewardEngine):
+  r = -(jobs in system) / 10            (sum = total turnaround, Little's law)
+      - 0.05 x context switches
+      - 1.0  x deadlines missed this tick
+      - 0.1  x jobs already past their deadline   (sum = 0.1 x lateness)
+  Bookkeeping was checked against measured misses/lateness on 30
+  workloads (exact match).
+
+Training mix (sample_training_workload):
+  15% periodic task sets (U 0.4-1.0 per core, horizon <= 300);
+  of the rest, 45% get per-job deadlines (slack uniform 1.5-6);
+  the remainder have no deadlines. Per episode that is 15% periodic,
+  about 38% aperiodic with deadlines, about 47% without deadlines.
+  (Periodic episodes are short, so their share of training STEPS is
+  smaller than 15%.)
+
+Checkpoint selection (backend/rl/train_ppo.py, ValidationCallback):
+  score = turnaround / FCFS on 70 deadline-free validation workloads
+        + miss rate on 30 deadline validation workloads.
+  Logs: models/training_logs/{mode}_{N}c.csv
+
+Sanity check: a hand-set "most urgent first" weight vector reproduces
+EDF's miss rate exactly, so the policy can express EDF.
+
+Training: 8 models (PPO and Hybrid x 1/2/4/8 cores), 5M steps each,
+lr 3e-4 (PPO) / 1e-4 (Hybrid), gamma 0.995, rollout 4096, batch 512,
+net [128,128], log_std -1.5. About 50 minutes with 8 runs in parallel.
+
+Models: models/ppo_scheduler_{N}c.zip, models/ppo_scheduler_hybrid_{N}c.zip
+(models.zip rebuilt). Previous turnaround-only models are archived in
+models/archive_2026-11-21_turnaround_only/.
+
+
+-------------------------------------------------------------------------------
+13. EXPERIMENTS AND RESULTS
+-------------------------------------------------------------------------------
+
+Script: backend/experiments/run_realtime.py  ->  results/realtime.csv
+  Suites:
+    aperiodic: existing workload types with deadlines at slack 1.5 / 3 / 6
+    periodic:  random task sets at U per core 0.5 / 0.7 / 0.9 / 1.0
+  Cores 1, 2, 4. All nine schedulers.
+
+Mean deadline miss rate (%), deadline-aware models:
+
+suite      slack/U cores  FCFS   SJF  SRTF    RR  MLFQ   EDF   RMS   PPO Hybrid
+aperiodic    1.5     1    94.4  87.2  78.7  99.1  98.8  93.1  94.4  92.5  90.1
+aperiodic    1.5     2    87.2  70.4  56.3  95.1  92.4  79.7  87.2  80.0  78.3
+aperiodic    1.5     4    56.7  40.7  27.7  66.4  64.4  34.8  56.7  41.1  37.9
+aperiodic    3.0     1    89.6  72.4  65.7  97.3  97.3  79.9  89.6  82.7  75.3
+aperiodic    3.0     2    73.9  48.4  39.5  88.0  85.7  48.7  73.9  50.3  48.3
+aperiodic    3.0     4    33.7  14.8  10.9  39.1  40.9  11.1  33.7  12.4   9.5
+aperiodic    6.0     1    77.9  55.5  50.8  93.5  93.5  55.7  77.9  59.6  55.6
+aperiodic    6.0     2    51.7  17.7  15.5  67.7  67.3  13.7  51.7  21.9  15.1
+aperiodic    6.0     4    10.9   0.3   0.0   2.3   2.5   0.0  10.9   0.3   0.4
+periodic     0.5    1-4    0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
+periodic     0.7     1     0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
+periodic     0.7     2     0.4   0.9   0.5   0.0   0.0   0.0   0.0   0.0   0.0
+periodic     0.7     4     0.4   0.6   1.8   1.1   0.9   0.8   1.1   1.3   1.1
+periodic     0.9     1    14.5   8.8   0.0   0.0   0.0   0.0   0.0   1.8   6.4
+periodic     0.9     2     8.1   6.8   4.7   3.3   2.9   1.9   4.1   2.8   4.5
+periodic     0.9     4     3.6   4.2   5.9   5.5   5.4   1.8   2.6   3.8   2.1
+periodic     1.0     1    34.3  30.3   2.7   7.2  10.2   0.0   2.7   7.4  21.3
+periodic     1.0     2    20.4  14.1  14.8  16.4  17.5  10.2  12.4  10.1  14.2
+periodic     1.0     4    23.6  12.8   8.2  15.1  14.9   7.9   6.5   9.1   8.1
+
+(SJF and SRTF know true burst lengths - they are oracles, not
+deployable schedulers.)
+
+Average miss rate over the 21 settings:
+  EDF 20.9 | Hybrid 22.3 (was 26.7) | PPO 22.7 (was 30.6) | RMS 28.8 |
+  FCFS 32.4
+
+Key findings:
+  * EDF meets every deadline on feasible single-core periodic sets
+    (U <= 1), as theory says; RMS starts missing above its bound.
+  * The Hybrid beats EDF on overloaded aperiodic workloads
+    (1 core slack 3: 75.3 vs 79.9; 4 cores slack 3: 9.5 vs 11.1):
+    under overload EDF keeps chasing doomed jobs (domino effect).
+  * Weakness: 1-core periodic sets at U = 1.0 (PPO 7.4%, Hybrid 21.3%,
+    EDF 0%). Visible on RT Overloaded: EDF 0/18, Hybrid 3/18.
+  * Turnaround on deadline-free workloads is preserved (ratio to FCFS,
+    1/2/4/8 cores): PPO 1.01/1.00/1.01/1.00, Hybrid 0.95/0.94/0.96/0.99.
+
+More detail: BUGFIX_ANALYSIS.md, section 6.
+
+
+-------------------------------------------------------------------------------
+14. LIGHT / DARK THEME
+-------------------------------------------------------------------------------
+
+A sun/moon button in the dashboard header switches themes. The choice is
+saved in localStorage ("aimos-theme"); first-time visitors get their OS
+preference. A small script in frontend/index.html applies it before first
+paint (no dark flash).
+
+Implementation:
+  * frontend/src/index.css: all theme colours are tokens defined twice,
+    on :root (dark) and :root[data-theme="light"]; Tailwind utilities
+    (bg-card, text-mtx3, border-ink/10, bg-field ...) read them.
+    Light mode uses darker accents for contrast, and remaps the
+    -300/-400 status colours (red, emerald, yellow ...) to -600/-700.
+  * frontend/src/lib/theme.js: useTheme() hook (theme + toggle) and
+    useChartColors() for Recharts (colours are props, not classes).
+  * Hard-coded dark colours in components were replaced by tokens
+    (white overlays -> "ink", #12121e inputs -> "field").
+  * Fix found on the way: the text-mtx1..5 classes were never generated
+    (Tailwind 4 ignores tailwind.config.js), so all that text showed in
+    one grey. They are now real theme colours in both modes.
+
+
+-------------------------------------------------------------------------------
+15. VERIFICATION PERFORMED
+-------------------------------------------------------------------------------
+
+  * EDF: 0 misses on 120 random feasible single-core periodic sets.
+  * RT Overloaded on 1 core: EDF 0 misses, RMS 2.
+  * Turnaround - waiting = burst for EDF and RMS (waiting-time check).
+  * /simulate and /compare give identical metrics for every scheduler.
+  * Both synthetic traces import; malformed files return HTTP 400.
+  * backend/rl/test.py (environment smoke test incl. check_env) passes.
+  * Reward deadline terms match measured misses/lateness exactly.
+  * Frontend: eslint clean, vite build passes.
+  * Browser tests (Playwright, real Chrome): real-time suite 16/16
+    (RT preset, period tags, RMS alerts appear only during playback,
+    EDF zero breaches, Auto Deadlines, trace import, no console errors);
+    regression suite 17/17; theme toggle, persistence after reload and
+    OS-preference default checked with screenshots of both themes.
+
+
+-------------------------------------------------------------------------------
+16. HOW TO RUN AND DEMO
+-------------------------------------------------------------------------------
+
+Run:
+  Backend   (repo root)  PYTHONPATH=. .venv/bin/python -m backend.app
+            -> http://localhost:5001
+  Frontend  (frontend/)  npm run dev
+            -> http://localhost:5173
+
+Five-minute demo:
+  1. CPU Cores = 1, click RT Overloaded (18 jobs, U = 0.96 vs bound 0.78).
+  2. Scheduler Rate Monotonic, Run Simulation, playback 10x, play.
+     Two SLA breaches appear at t=12 and t=36; logger blocks get red
+     outlines; Deadline Misses = 11.1%.
+  3. Switch to Earliest Deadline First and run: "Every deadline met."
+  4. Check the Deadline Miss column of the comparison table.
+  5. Click Mixed, then Auto Deadlines (P0 deadline = 0 + 3 x 13 = 39);
+     on 2 cores PPO and Hybrid beat every other scheduler (DASHBOARD_GUIDE.txt).
+  6. Import Cluster Trace (Auto-detect) with
+     backend/experiments/sample_traces/synthetic_google_task_events.csv.
+
+Experiments:
+  PYTHONPATH=. .venv/bin/python -m backend.experiments.run_realtime
+  PYTHONPATH=. .venv/bin/python -m backend.rl.train_ppo --mode hybrid --cores 1
+
+
+-------------------------------------------------------------------------------
+17. GETTING REAL TRACE FILES
+-------------------------------------------------------------------------------
+
+  Google cluster-data 2011 (task_events)
+    Instructions: github.com/google/cluster-data (ClusterData2011_2)
+    gsutil cp gs://clusterdata-2011-2/task_events/part-00000-of-00500.csv.gz .
+    gunzip part-00000-of-00500.csv.gz
+    One part file is enough (only 60 tasks are used).
+
+  Alibaba cluster-trace-v2018 (batch_task.csv)
+    Instructions: github.com/alibaba/clusterdata (cluster-trace-v2018)
+    Download link is given after a short survey; extract batch_task.csv.
+
+  Before importing:
+    * unzip - the importer reads plain CSV only (.gz is not supported);
+    * keep files under 64 MB, e.g.
+        head -n 200000 batch_task.csv > alibaba_slice.csv
+
+  (Addresses written from memory - confirm on the publishers' pages.)
+
+
+-------------------------------------------------------------------------------
+18. KNOWN LIMITATIONS AND POSSIBLE NEXT STEPS
+-------------------------------------------------------------------------------
+
+  * Learned models still miss deadlines on 1-core periodic sets at full
+    load (U = 1.0) where EDF misses none. Fix idea: more periodic sets in
+    the training mix, or a stronger penalty near full load (~1 hour of
+    retraining).
+  * Multi-core schedulability is shown as a per-core heuristic, not an
+    exact test.
+  * Trace import takes the first 60 tasks only; .gz files and files over
+    64 MB need manual preparation (could be automated).
+  * Alibaba traces carry no deadlines; Auto Deadlines uses a fixed slack
+    of 3 (not adjustable in the UI).
+  * Nothing from Phase 2 is committed to git yet.
+
+===============================================================================
